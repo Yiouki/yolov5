@@ -1,0 +1,1 @@
+python train.py --img 1024 --data data/dgx_data.yaml --cfg models/custom_yolov5s.yaml --name first_tst --cache True
