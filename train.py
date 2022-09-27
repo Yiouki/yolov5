@@ -32,6 +32,7 @@ import torch.nn as nn
 import yaml
 from torch.optim import lr_scheduler
 from tqdm import tqdm
+from utils.recurrent_results import ResultsEachEpoch
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -53,7 +54,7 @@ from utils.general import (LOGGER, check_amp, check_dataset, check_file, check_g
                            one_cycle, print_args, print_mutation, strip_optimizer, yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
-from utils.loggers.wandb.wandb_utils import check_wandb_resume
+from utils.wandb_logging.wandb_utils import check_wandb_resume
 from utils.loss import ComputeLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve
@@ -239,6 +240,21 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
 
+    # To ha ve results at each epoch
+    if opt.results_period:
+        opt.results_period = ResultsEachEpoch(data_dict,
+                                              batch_size=batch_size // WORLD_SIZE * 2,
+                                              imgsz=imgsz,
+                                              model=model,
+                                              iou_thres=0.60,
+                                              single_cls=single_cls,
+                                              dataloader=val_loader,
+                                              save_dir=save_dir,
+                                              verbose=True,
+                                              plots=plots,
+                                              callbacks=callbacks,
+                                              compute_loss=compute_loss)
+
     # Start training
     t0 = time.time()
     nb = len(train_loader)  # number of batches
@@ -360,7 +376,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
             # Update best mAP
             fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
-            stop = stopper(epoch=epoch, fitness=fi)  # early stop check
+            stop = stopper(epoch=epoch, fitness=fi) if opt.early_stop else False  # early stop check
             if fi > best_fitness:
                 best_fitness = fi
             log_vals = list(mloss) + list(results) + lr
@@ -437,7 +453,7 @@ def parse_opt(known=False):
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
+    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=512, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
@@ -460,6 +476,7 @@ def parse_opt(known=False):
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')
     parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
+    parser.add_argument('--early-stop', action='store_true', help='To enable EarlyStopping (to combine with patience)')
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
     parser.add_argument('--results-period', type=int, default=-1, help='Save results every x epochs')
