@@ -118,10 +118,10 @@ class ComputeLoss:
         self.anchors = m.anchors
         self.device = device
 
-    def __call__(self, p, targets):  # predictions, targets, model
-        device = targets.device
-        lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-        print(f"[{__file__}] (DEBUG) targets = {targets}")
+    def __call__(self, p, targets):  # predictions, targets
+        lcls = torch.zeros(1, device=self.device)  # class loss
+        lbox = torch.zeros(1, device=self.device)  # box loss
+        lobj = torch.zeros(1, device=self.device)  # object loss
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Losses
