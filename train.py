@@ -240,21 +240,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
 
-    # To ha ve results at each epoch
-    if opt.results_period:
-        opt.results_period = ResultsEachEpoch(data_dict,
-                                              batch_size=batch_size // WORLD_SIZE * 2,
-                                              imgsz=imgsz,
-                                              model=model,
-                                              iou_thres=0.60,
-                                              single_cls=single_cls,
-                                              dataloader=val_loader,
-                                              save_dir=save_dir,
-                                              verbose=True,
-                                              plots=plots,
-                                              callbacks=callbacks,
-                                              compute_loss=compute_loss)
-
     # Start training
     t0 = time.time()
     nb = len(train_loader)  # number of batches
@@ -267,6 +252,23 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
+
+    # To ha ve results at each epoch
+    if opt.results_period:
+        opt.results_period = ResultsEachEpoch(data_dict,
+                                              batch_size=batch_size // WORLD_SIZE * 2,
+                                              imgsz=imgsz,
+                                              model=model,
+                                              half=False,
+                                              iou_thres=0.60,
+                                              single_cls=single_cls,
+                                              dataloader=val_loader,
+                                              save_dir=save_dir,
+                                              verbose=True,
+                                              plots=plots,
+                                              callbacks=callbacks,
+                                              compute_loss=compute_loss)
+
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
@@ -414,6 +416,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             break  # must break all DDP ranks
 
         # end epoch ----------------------------------------------------------------------------------------------------
+
+        # TODO: save results recurrent
+        
     # end training -----------------------------------------------------------------------------------------------------
     if RANK in {-1, 0}:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')

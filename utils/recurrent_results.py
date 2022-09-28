@@ -23,6 +23,7 @@ class ResultsEachEpoch():
                  augment=False,  # augmented inference
                  batch_size=32,  # batch size
                  imgsz=512,  # inference size (pixels)
+                 iou_thres=0.6,  # NMS IoU threshold
                  conf_thres=0.001,  # confidence threshold
                  compute_loss=None,
                  callbacks=Callbacks(),
@@ -42,6 +43,7 @@ class ResultsEachEpoch():
         self.augment = augment
         self.batch_size = batch_size
         self.imgsz = imgsz
+        self.iou_thres = iou_thres
         self.conf_thres = conf_thres
         self.compute_loss = compute_loss
         self.callbacks = callbacks
