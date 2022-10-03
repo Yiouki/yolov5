@@ -265,7 +265,8 @@ def run(
             if save_json:
                 save_one_json(predn, jdict, path, class_map)  # append to COCO-JSON dictionary
             callbacks.run('on_val_image_end', pred, predn, path, names, im[si])
-            callbacks.run('on_recurrent_save_img', epoch, (predn, shape, path.stem))
+            if recurrent_save:
+                callbacks.run('on_recurrent_save_img', epoch, (predn, shape, path.stem))
 
         # Plot images
         if plots and batch_i < 3:
