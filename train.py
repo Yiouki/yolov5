@@ -241,19 +241,19 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.names = names
 
     # To ha ve results at each epoch
-    if opt.results_period:
-        opt.results_period = ResultsEachEpoch(data_dict,
-                                              batch_size=batch_size // WORLD_SIZE * 2,
-                                              imgsz=imgsz,
-                                              model=model,
-                                              iou_thres=0.60,
-                                              single_cls=single_cls,
-                                              dataloader=val_loader,
-                                              save_dir=save_dir,
-                                              verbose=True,
-                                              plots=plots,
-                                              callbacks=callbacks,
-                                              compute_loss=compute_loss)
+    # if opt.results_period:
+    #     opt.results_period = ResultsEachEpoch(data_dict,
+    #                                           batch_size=batch_size // WORLD_SIZE * 2,
+    #                                           imgsz=imgsz,
+    #                                           model=model,
+    #                                           iou_thres=0.60,
+    #                                           single_cls=single_cls,
+    #                                           dataloader=val_loader,
+    #                                           save_dir=save_dir,
+    #                                           verbose=True,
+    #                                           plots=plots,
+    #                                           callbacks=callbacks,
+    #                                           compute_loss=compute_loss)
 
     # Start training
     t0 = time.time()
