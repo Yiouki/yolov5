@@ -32,7 +32,6 @@ import torch.nn as nn
 import yaml
 from torch.optim import lr_scheduler
 from tqdm import tqdm
-from utils.recurrent_results import ResultsEachEpoch
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -240,21 +239,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
 
-    # To ha ve results at each epoch
-    # if opt.results_period:
-    #     opt.results_period = ResultsEachEpoch(data_dict,
-    #                                           batch_size=batch_size // WORLD_SIZE * 2,
-    #                                           imgsz=imgsz,
-    #                                           model=model,
-    #                                           iou_thres=0.60,
-    #                                           single_cls=single_cls,
-    #                                           dataloader=val_loader,
-    #                                           save_dir=save_dir,
-    #                                           verbose=True,
-    #                                           plots=plots,
-    #                                           callbacks=callbacks,
-    #                                           compute_loss=compute_loss)
-
     # Start training
     t0 = time.time()
     nb = len(train_loader)  # number of batches
@@ -267,6 +251,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
+
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
@@ -362,7 +347,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
             final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
             if not noval or final_epoch:  # Calculate mAP
-                results, maps, _ = validate.run(data_dict,
+                results, maps, _ = validate.run(epoch=epoch,
+                                                data=data_dict,
                                                 batch_size=batch_size // WORLD_SIZE * 2,
                                                 imgsz=imgsz,
                                                 half=amp,
@@ -372,7 +358,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                                 save_dir=save_dir,
                                                 plots=False,
                                                 callbacks=callbacks,
-                                                compute_loss=compute_loss)
+                                                compute_loss=compute_loss,
+                                                recurrent_save=opt.recurrent_save)
 
             # Update best mAP
             fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
@@ -380,7 +367,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             if fi > best_fitness:
                 best_fitness = fi
             log_vals = list(mloss) + list(results) + lr
-            callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
+            callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)  # Save into results.csv
 
             # Save model
             if (not nosave) or (final_epoch and not evolve):  # if save
@@ -412,8 +399,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 stop = broadcast_list[0]
         if stop:
             break  # must break all DDP ranks
-
         # end epoch ----------------------------------------------------------------------------------------------------
+        
     # end training -----------------------------------------------------------------------------------------------------
     if RANK in {-1, 0}:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
@@ -423,7 +410,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 if f is best:
                     LOGGER.info(f'\nValidating {f}...')
                     results, _, _ = validate.run(
-                        data_dict,
+                        epoch="Best",
+                        data=data_dict,
                         batch_size=batch_size // WORLD_SIZE * 2,
                         imgsz=imgsz,
                         model=attempt_load(f, device).half(),
@@ -435,7 +423,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                         verbose=True,
                         plots=plots,
                         callbacks=callbacks,
-                        compute_loss=compute_loss)  # val best model with plots
+                        compute_loss=compute_loss,
+                        recurrent_save=opt.recurrent_save)  # val best model with plots
                     if is_coco:
                         callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
 
@@ -479,6 +468,7 @@ def parse_opt(known=False):
     parser.add_argument('--early-stop', action='store_true', help='To enable EarlyStopping (to combine with patience)')
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
+    parser.add_argument('--recurrent-save', action='store_true', help='Save results every epoch and more data')
     parser.add_argument('--results-period', type=int, default=-1, help='Save results every x epochs')
     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
@@ -499,6 +489,11 @@ def main(opt, callbacks=Callbacks()):
         print_args(vars(opt))
         check_git_status()
         check_requirements()
+
+    # If reccurent save is ask, impose the results period to 1
+    if opt.recurrent_save:
+        opt.results_period = 1
+        opt.noval = False
 
     # Resume (from specified or most recent last.pt)
     if opt.resume and not check_wandb_resume(opt) and not check_comet_resume(opt) and not opt.evolve:
@@ -524,6 +519,7 @@ def main(opt, callbacks=Callbacks()):
             opt.exist_ok, opt.resume = opt.resume, False  # pass resume to exist_ok and disable resume
         if opt.name == 'cfg':
             opt.name = Path(opt.cfg).stem  # use model.yaml as name
+        opt.name = f"{opt.name}_noFreeze" if len(opt.freeze) > 0 else f"{opt.name}_freeze{opt.freeze}"
         opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))
 
     # DDP mode
