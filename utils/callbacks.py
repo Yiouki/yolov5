@@ -29,6 +29,8 @@ class Callbacks:
             'on_val_batch_end': [],
             'on_val_end': [],
             'on_fit_epoch_end': [],  # fit = train + val
+            'on_recurrent_save_img': [],  # save labels on each epoch
+            'on_recurrent_save_metrics': [],  # save more data on each epoch
             'on_model_save': [],
             'on_train_end': [],
             'on_params_update': [],

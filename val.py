@@ -47,6 +47,7 @@ from utils.torch_utils import select_device, smart_inference_mode
 
 
 def save_one_txt(predn, save_conf, shape, file):
+    Path(file).parent.mkdir(parents=True, exist_ok=True)
     # Save one txt result
     gn = torch.tensor(shape)[[1, 0, 1, 0]]  # normalization gain whwh
     for *xyxy, conf, cls in predn.tolist():
@@ -96,6 +97,7 @@ def process_batch(detections, labels, iouv):
 
 @smart_inference_mode()
 def run(
+        epoch,
         data,
         weights=None,  # model.pt path(s)
         batch_size=32,  # batch size
@@ -124,6 +126,7 @@ def run(
         plots=True,
         callbacks=Callbacks(),
         compute_loss=None,
+        recurrent_save=False,
 ):
     # Initialize/load model and set device
     training = model is not None
@@ -262,6 +265,7 @@ def run(
             if save_json:
                 save_one_json(predn, jdict, path, class_map)  # append to COCO-JSON dictionary
             callbacks.run('on_val_image_end', pred, predn, path, names, im[si])
+            callbacks.run('on_recurrent_save_img', epoch, (predn, shape, path.stem))
 
         # Plot images
         if plots and batch_i < 3:
@@ -277,6 +281,10 @@ def run(
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
     nt = np.bincount(stats[3].astype(int), minlength=nc)  # number of targets per class
+    if recurrent_save:
+        metrics_global = (nt, tp, fp, p, r, f1, ap50, mp, mr, map50, map)
+        metrics_img = (ap, ap_class)
+        callbacks.run('on_recurrent_save_metrics', epoch, metrics_global, metrics_img)
 
     # Print results
     pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format

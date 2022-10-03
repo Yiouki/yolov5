@@ -16,6 +16,7 @@ from utils.loggers.clearml.clearml_utils import ClearmlLogger
 from utils.loggers.wandb.wandb_utils import WandbLogger
 from utils.plots import plot_images, plot_labels, plot_results
 from utils.torch_utils import de_parallel
+from val import save_one_txt
 
 LOGGERS = ('csv', 'tb', 'wandb', 'clearml', 'comet')  # *.csv, TensorBoard, Weights & Biases, ClearML
 RANK = int(os.getenv('RANK', -1))
@@ -58,6 +59,9 @@ class Loggers():
     # YOLOv5 Loggers class
     def __init__(self, save_dir=None, weights=None, opt=None, hyp=None, logger=None, include=LOGGERS):
         self.save_dir = save_dir
+        self.recurrent_save = opt.recurrent_save
+        if self.recurrent_save:
+            self.recurrent_save_dir = save_dir / 'Results_per_epoch'
         self.weights = weights
         self.opt = opt
         self.hyp = hyp
@@ -77,7 +81,22 @@ class Loggers():
             'val/cls_loss',  # val loss
             'x/lr0',
             'x/lr1',
-            'x/lr2']  # params
+            'x/lr2',]  # params
+        self.keys_metrics = [
+            'Number Targets',
+            'True Positive',
+            'False Positive',
+            'Precision',
+            'Recall',
+            'F1 score',
+            'AP/AP50',
+            'mean/Precision',  # val loss
+            'mean/Recall',
+            'mean/AP50',
+            'mean/AP']  # params
+        self.keys_img = [
+            'Average Precision',
+            "AP per class"]
         self.best_keys = ['best/epoch', 'best/precision', 'best/recall', 'best/mAP_0.5', 'best/mAP_0.5:0.95']
         for k in LOGGERS:
             setattr(self, k, None)  # init empty logger dictionary
@@ -254,6 +273,36 @@ class Loggers():
 
         if self.comet_logger:
             self.comet_logger.on_fit_epoch_end(x, epoch=epoch)
+
+    def on_recurrent_save_metrics(self, epoch, v_global, v_img):
+        save_dir = self.recurrent_save_dir / f"{epoch}"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Global
+        x = dict(zip(self.keys_metrics, v_global))
+        file = save_dir / 'metrics_global_data.csv'
+        n = len(x)  # number of cols
+        s = '' if file.exists() else (('%20s,' * n % tuple(self.keys_metrics)).rstrip(',') + '\n')  # add header
+        with open(file, 'a') as f:
+            f.write(s + ('%20.5g,' * n % tuple(v_global)).rstrip(',') + '\n')
+
+        # Image
+        file = save_dir / 'metrics_image_data.csv'
+        n = len(v_img)  # number of cols
+        s = '' if file.exists() else (('%20s,' * n % tuple(self.keys_img)).rstrip(',') + '\n')  # add header
+        with open(file, 'a') as f:
+            for v in zip(*v_img):
+                f.write(s + ('%20.5g,' * n % tuple(v)).rstrip(',') + '\n')
+
+    def on_recurrent_save_img(self, epoch, preds_tuple, save_conf=True):
+        save_dir = self.recurrent_save_dir / f"{epoch}"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Preds
+        preds_dir = save_dir / 'labels'
+        preds_dir.mkdir(parents=True, exist_ok=True)
+        preds, shape, img_name = preds_tuple
+        save_one_txt(preds, save_conf, shape, file=preds_dir / f'{img_name}.txt')
 
     def on_model_save(self, last, epoch, final_epoch, best_fitness, fi):
         # Callback runs on model save event
