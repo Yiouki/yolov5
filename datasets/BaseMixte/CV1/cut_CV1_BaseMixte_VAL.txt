@@ -1,0 +1,10 @@
+/home/ruiz/data/Databases/DGX_512/4CV/images/3/FLEG_20160427_111715_channel4_waterfall_crop_3401_13464.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/2/FLEG_20130529_004303_channel1_waterfall_crop_2444_8373.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/2/FLEG_20130529_005946_channel2_waterfall_crop_2042_5933.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/3/FLEG_20160427_104130_channel4_waterfall_crop_1047_2345.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/4/FLEG_20160422_165842_channel6_waterfall_crop_1890_16989.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/3/00009_9053865533863185476_crop_2857_13470.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/4/FLEG_20130529_021638_channel6_waterfall_crop_2259_16734.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/4/FLEG_20130528_220446_channel4_waterfall_crop_2548_8414.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/3/00016_3681985991512572914_crop_3618_3087.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/3/FLEG_20160422_180455_channel6_waterfall_crop_3005_688.png
