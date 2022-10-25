@@ -390,7 +390,6 @@ class CometLogger:
 
     def on_train_epoch_end(self, epoch):
         self.experiment.curr_epoch = epoch
-
         return
 
     def on_train_batch_start(self):

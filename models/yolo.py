@@ -166,6 +166,7 @@ class DetectionModel(BaseModel):
     # YOLOv5 detection model
     def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
         super().__init__()
+        print(f'\n\n\t{cfg}')
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
         else:  # is *.yaml

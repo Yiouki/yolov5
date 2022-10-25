@@ -29,6 +29,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from utils.loggers import Loggers
+
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -39,7 +41,7 @@ from models.common import DetectMultiBackend
 from utils.callbacks import Callbacks
 from utils.dataloaders import create_dataloader
 from utils.general import (LOGGER, Profile, check_dataset, check_img_size, check_requirements, check_yaml,
-                           coco80_to_coco91_class, colorstr, increment_path, non_max_suppression, print_args,
+                           coco80_to_coco91_class, colorstr, increment_path, methods, non_max_suppression, print_args,
                            scale_boxes, xywh2xyxy, xyxy2xywh)
 from utils.metrics import ConfusionMatrix, ap_per_class, box_iou
 from utils.plots import output_to_target, plot_images, plot_val_study
@@ -97,8 +99,8 @@ def process_batch(detections, labels, iouv):
 
 @smart_inference_mode()
 def run(
-        epoch,
         data,
+        epoch='',
         weights=None,  # model.pt path(s)
         batch_size=32,  # batch size
         imgsz=640,  # inference size (pixels)
@@ -127,6 +129,7 @@ def run(
         callbacks=Callbacks(),
         compute_loss=None,
         recurrent_save=False,
+        save_metrics_eval=False,
 ):
     # Initialize/load model and set device
     training = model is not None
@@ -140,6 +143,13 @@ def run(
         # Directories
         save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
+
+        # Loggers
+        loggers = Loggers(save_dir, logger=LOGGER, recurrent_save=recurrent_save, save_metrics_eval=save_metrics_eval, noplots=not plots)  # loggers instance
+
+        # Register actions
+        for k in methods(loggers):
+            callbacks.register_action(k, callback=getattr(loggers, k))
 
         # Load model
         model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
@@ -282,7 +292,7 @@ def run(
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
     nt = np.bincount(stats[3].astype(int), minlength=nc)  # number of targets per class
-    if recurrent_save:
+    if recurrent_save or save_metrics_eval:
         metrics_global = (nt, tp, fp, p, r, f1, ap50, mp, mr, map50, map)
         metrics_img = (ap, ap_class)
         callbacks.run('on_recurrent_save_metrics', epoch, metrics_global, metrics_img)
@@ -365,6 +375,8 @@ def parse_opt():
     parser.add_argument('--save-hybrid', action='store_true', help='save label+prediction hybrid results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-json', action='store_true', help='save a COCO-JSON results file')
+    parser.add_argument('--recurrent-save', action='store_true', help='Save results every epoch and more data')
+    parser.add_argument('--save-metrics-eval', action='store_true', help='Save results more data during the evaluation')
     parser.add_argument('--project', default=ROOT / 'runs/val', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
@@ -413,4 +425,5 @@ def main(opt):
 
 if __name__ == "__main__":
     opt = parse_opt()
+
     main(opt)

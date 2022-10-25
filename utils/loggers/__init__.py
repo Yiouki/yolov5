@@ -16,7 +16,6 @@ from utils.loggers.clearml.clearml_utils import ClearmlLogger
 from utils.loggers.wandb.wandb_utils import WandbLogger
 from utils.plots import plot_images, plot_labels, plot_results
 from utils.torch_utils import de_parallel
-from val import save_one_txt
 
 LOGGERS = ('csv', 'tb', 'wandb', 'clearml', 'comet')  # *.csv, TensorBoard, Weights & Biases, ClearML
 RANK = int(os.getenv('RANK', -1))
@@ -57,15 +56,18 @@ except (ModuleNotFoundError, ImportError, AssertionError):
 
 class Loggers():
     # YOLOv5 Loggers class
-    def __init__(self, save_dir=None, weights=None, opt=None, hyp=None, logger=None, include=LOGGERS):
+    def __init__(self, save_dir=None, weights=None, opt=None, hyp=None, logger=None, include=LOGGERS,
+                 recurrent_save=False, save_metrics_eval=False, noplots=False):
         self.save_dir = save_dir
-        self.recurrent_save = opt.recurrent_save
+        self.recurrent_save = recurrent_save
         if self.recurrent_save:
             self.recurrent_save_dir = save_dir / 'Results_per_epoch'
+        if save_metrics_eval:
+            self.recurrent_save_dir = save_dir
         self.weights = weights
         self.opt = opt
         self.hyp = hyp
-        self.plots = not opt.noplots  # plot results
+        self.plots = not noplots  # plot results
         self.logger = logger  # for printing results to console
         self.include = include
         self.keys = [
@@ -93,7 +95,7 @@ class Loggers():
             'mean/Precision',  # val loss
             'mean/Recall',
             'mean/AP50',
-            'mean/AP']  # params
+            'mean/AP95']  # params
         self.keys_img = [
             'Average Precision',
             "AP per class"]
@@ -117,7 +119,7 @@ class Loggers():
             self.logger.info(s)
         # TensorBoard
         s = self.save_dir
-        if 'tb' in self.include and not self.opt.evolve:
+        if 'tb' in self.include and self.opt is not None and not self.opt.evolve:
             prefix = colorstr('TensorBoard: ')
             self.logger.info(f"{prefix}Start with 'tensorboard --logdir {s.parent}', view at http://localhost:6006/")
             self.tb = SummaryWriter(str(s))
@@ -295,6 +297,8 @@ class Loggers():
                 f.write(s + ('%20.5g,' * n % tuple(v)).rstrip(',') + '\n')
 
     def on_recurrent_save_img(self, epoch, preds_tuple, save_conf=True):
+        from val import save_one_txt
+        epoch = epoch if epoch else "Eval_metrics"
         save_dir = self.recurrent_save_dir / f"{epoch}"
         save_dir.mkdir(parents=True, exist_ok=True)
 

@@ -160,6 +160,9 @@ def run(
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
+                if save_txt and Path(f'{txt_path}.txt').exists():  # Remove the file if already exists
+                    os.popen(f"rm {txt_path}.txt")
+
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
@@ -173,6 +176,8 @@ def run(
                         annotator.box_label(xyxy, label, color=colors(c, True))
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+            # elif save_txt:  # If there is no detection, create an empty text file
+            #     os.popen(f'touch {txt_path}.txt')
 
             # Stream results
             im0 = annotator.result()
