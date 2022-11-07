@@ -57,7 +57,7 @@ from utils.loggers.wandb.wandb_utils import check_wandb_resume
 from utils.loss import ComputeLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve
-from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_device, smart_DDP, smart_optimizer,
+from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, model_save, select_device, smart_DDP, smart_optimizer,
                                smart_resume, torch_distributed_zero_first)
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
@@ -66,9 +66,9 @@ WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
-    save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, freeze = \
+    save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, finetune, noval, nosave, workers, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
-        opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
+        opt.resume, opt.finetuning, opt.noval, opt.nosave, opt.workers, opt.freeze
     callbacks.run('on_pretrain_routine_start')
 
     # Directories
@@ -80,9 +80,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     if isinstance(hyp, str):
         with open(hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
-    LOGGER.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
-    if opt.lr0:  # If there is a LR enter by the user, overwrite it
+    if opt.lr0 and not opt.finetuning:  # If there is a LR enter by the user and it is not for finetune a model, overwrite it
         hyp['lr0'] = float(opt.lr0)
+    LOGGER.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     opt.hyp = hyp.copy()  # for saving hyps to checkpoints
 
     # Save run settings
@@ -103,6 +103,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         data_dict = loggers.remote_dataset
         if resume:  # If resuming runs from remote artifact
             weights, epochs, hyp, batch_size = opt.weights, opt.epochs, opt.hyp, opt.batch_size
+        if finetune and resume:
+            epochs += int(finetune)
 
     # Config
     plots = not evolve and not opt.noplots  # create plots
@@ -170,7 +172,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     best_fitness, start_epoch = 0.0, 0
     if pretrained:
         if resume:
-            best_fitness, start_epoch, epochs = smart_resume(ckpt, optimizer, ema, weights, epochs, resume)
+            best_fitness, start_epoch, epochs = smart_resume(ckpt, optimizer, ema, weights, epochs, resume, finetune)
         del ckpt, csd
 
     # DP mode
@@ -240,6 +242,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.hyp = hyp  # attach hyperparameters to model
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
+
+    if opt.debug_finetuning:
+        model_save(model, Path(opt.save_dir) / "weights", "debug_weights_init")
 
     # Start training
     t0 = time.time()
@@ -404,17 +409,22 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         # end epoch ----------------------------------------------------------------------------------------------------
         
     # end training -----------------------------------------------------------------------------------------------------
+
+    # DEBUG: save weights of layers into a NPY files in order to compare it after the reloading
+    if opt.debug_finetuning:
+        model_save(model, Path(opt.save_dir) / "weights", "debug_weights")
+
     if RANK in {-1, 0}:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
         for f in last, best:
             if f.exists():
                 strip_optimizer(f)  # strip optimizers
                 if f is best:
-                    LOGGER.info(f'\nValidating {f}...')
+                    LOGGER.info(f'\nValidating {f} ...')
                     results, _, _ = validate.run(
                         epoch="Best",
                         data=data_dict,
-                        batch_size=batch_size // WORLD_SIZE * 2,
+                        batch_size= batch_size // WORLD_SIZE * 2,
                         imgsz=imgsz,
                         model=attempt_load(f, device).half(),
                         iou_thres=0.65 if is_coco else 0.60,  # best pycocotools at iou 0.65
@@ -447,6 +457,8 @@ def parse_opt(known=False):
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=512, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
+    parser.add_argument('--finetuning', nargs='?', const=True, default=False, help='finetune a model specified, enter the number of epochs of finetuning')
+    parser.add_argument('--debug-finetuning', action='store_true', help="Save weights in pickle files to compare between last save and loading")
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--noval', action='store_true', help='only validate final epoch')
     parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
@@ -500,6 +512,8 @@ def main(opt, callbacks=Callbacks()):
 
     # Resume (from specified or most recent last.pt)
     if opt.resume and not check_wandb_resume(opt) and not check_comet_resume(opt) and not opt.evolve:
+        opt_finetuning, opt_device, opt_recurrent_save = opt.finetuning, opt.device, opt.recurrent_save
+        opt_project, opt_name = opt.project, opt.name
         last = Path(check_file(opt.resume) if isinstance(opt.resume, str) else get_latest_run())
         opt_yaml = last.parent.parent / 'opt.yaml'  # train options yaml
         opt_data = opt.data  # original dataset
@@ -510,6 +524,9 @@ def main(opt, callbacks=Callbacks()):
             d = torch.load(last, map_location='cpu')['opt']
         opt = argparse.Namespace(**d)  # replace
         opt.cfg, opt.weights, opt.resume = '', str(last), True  # reinstate
+        if opt_finetuning:
+            opt.finetuning, opt.data, opt.device, opt.recurrent_save = opt_finetuning, opt_data, opt_device, opt_recurrent_save
+            opt.save_dir = str(increment_path(Path(opt_project) / opt_name, exist_ok=opt.exist_ok))
         if is_url(opt_data):
             opt.data = check_file(opt_data)  # avoid HUB resume auth timeout
     else:
@@ -639,10 +656,46 @@ def run(**kwargs):
     opt = parse_opt(True)
     for k, v in kwargs.items():
         setattr(opt, k, v)
+
     main(opt)
     return opt
 
 
 if __name__ == "__main__":
     opt = parse_opt()
+
+    # DEBUG
+    if opt.debug_finetuning:
+        print("\n\tFINETUNING")
+        opt.epochs = 1
+        
+        op_folder = Path(opt.project) / opt.name
+        if op_folder.exists():
+            import pickle as pk
+
+            # Torch load
+            weights = op_folder / "weights" / "last.pt"
+            complete_file = torch.load(weights)
+            model = complete_file['model']
+            dict_weights = {}
+            for i, p in enumerate(model.parameters()):
+                dict_weights[f"weights_{i}"] = p.data.cpu().numpy()
+
+            # Pickle load
+            pkl_file = op_folder / "weights" / "debug_weights.pkl"
+            with open(pkl_file, 'rb') as f:
+                dict_load = pk.load(f)
+
+            # Compare them
+            for (k1, v1), (k2, v2) in zip(dict_weights.items(), dict_load.items()):
+                if k1 != k2:
+                    print(f"Problem with keys: {k1} != {k2}")
+                    print("\n\n\tFALSE BRO")
+                    sys.exit(-1)
+                if not np.array_equal(v1, v2):
+                    print("\n\n\tFALSE BRO")
+                    sys.exit(-1)
+            print("\n\n\tTRUE BRO")
+            sys.exit(-1)
+
     main(opt)

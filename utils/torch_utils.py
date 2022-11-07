@@ -293,6 +293,22 @@ def model_info(model, verbose=False, imgsz=640):
     LOGGER.info(f"{name} summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
 
 
+def model_save(model, save_dir, name, verbose=False):
+    import pickle as pk
+    import numpy as np
+    # print(model)
+    
+    dict_weights = {}
+    for i, p in enumerate(model.parameters()):
+        dict_weights[f"weights_{i}"] = np.float16(p.data.cpu().numpy())
+
+    # Save data into the pickle file
+    pkl_file = save_dir / f"{name}.pkl"
+    with open(pkl_file, 'wb') as f:
+        pk.dump(dict_weights, f, pk.HIGHEST_PROTOCOL)
+
+
+
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)
     # Scales img(bs,3,y,x) by ratio constrained to gs-multiple
     if ratio == 1.0:
@@ -356,7 +372,7 @@ def smart_hub_load(repo='ultralytics/yolov5', model='yolov5s', **kwargs):
         return torch.hub.load(repo, model, force_reload=True, **kwargs)
 
 
-def smart_resume(ckpt, optimizer, ema=None, weights='yolov5s.pt', epochs=300, resume=True):
+def smart_resume(ckpt, optimizer, ema=None, weights='yolov5s.pt', epochs=300, resume=True, finetune=0):
     # Resume training from a partially trained checkpoint
     best_fitness = 0.0
     start_epoch = ckpt['epoch'] + 1
@@ -367,9 +383,13 @@ def smart_resume(ckpt, optimizer, ema=None, weights='yolov5s.pt', epochs=300, re
         ema.ema.load_state_dict(ckpt['ema'].float().state_dict())  # EMA
         ema.updates = ckpt['updates']
     if resume:
-        assert start_epoch > 0, f'{weights} training to {epochs} epochs is finished, nothing to resume.\n' \
-                                f"Start a new training without --resume, i.e. 'python train.py --weights {weights}'"
-        LOGGER.info(f'Resuming training from {weights} from epoch {start_epoch} to {epochs} total epochs')
+        if not finetune:
+            assert start_epoch > 0, f'{weights} training to {epochs} epochs is finished, nothing to resume.\n' \
+                                    f"Start a new training without --resume, i.e. 'python train.py --weights {weights}'"
+            LOGGER.info(f'Resuming training from {weights} from epoch {start_epoch} to {epochs} total epochs')
+        else:
+            start_epoch = epochs - int(finetune)
+            LOGGER.info(f'Start finetuning from {weights} from epoch {start_epoch} to {epochs} epochs.')
     if epochs < start_epoch:
         LOGGER.info(f"{weights} has been trained for {ckpt['epoch']} epochs. Fine-tuning for {epochs} more epochs.")
         epochs += ckpt['epoch']  # finetune additional epochs
