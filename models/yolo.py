@@ -166,7 +166,7 @@ class DetectionModel(BaseModel):
     # YOLOv5 detection model
     def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
         super().__init__()
-        print(f'\n\n\t{cfg}')
+        # print(f'\n\n\t{cfg}')
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
         else:  # is *.yaml
@@ -282,7 +282,8 @@ class ClassificationModel(BaseModel):
         if isinstance(model, DetectMultiBackend):
             model = model.model  # unwrap DetectMultiBackend
         model.model = model.model[:cutoff]  # backbone
-        m = model.model[-1]  # last layer
+        # m = model.model[-1]  # last layer
+        print('[MEGA PROBLEM] Classification model erase the last layer')
         ch = m.conv.in_channels if hasattr(m, 'conv') else m.cv1.conv.in_channels  # ch into module
         c = Classify(ch, nc)  # Classify()
         c.i, c.f, c.type = m.i, m.f, 'models.common.Classify'  # index, from, type
