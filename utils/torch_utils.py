@@ -310,7 +310,9 @@ def model_save(model, save_dir, name, anchors='', verbose=False):
     print(f'Weights save to "{pkl_file}"')
 
     if anchors:
-        anc = np.float32(p.data.cpu().numpy())
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
+        anc = np.float32(model.model[-1].anchors.cpu().numpy().flatten())
         
         pkl_anchors = save_dir / f"{anchors}.pkl"
         with open(pkl_anchors, 'wb') as f:

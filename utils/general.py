@@ -954,7 +954,7 @@ def strip_optimizer(f='best.pt', s=''):  # from utils.general import *; strip_op
     torch.save(x, s or f)
     mb = os.path.getsize(s or f) / 1E6  # filesize
     LOGGER.info(f"Optimizer stripped from {f},{f' saved as {s},' if s else ''} {mb:.1f}MB")
-    return f
+    return s or f
 
 
 def print_mutation(results, hyp, save_dir, bucket, prefix=colorstr('evolve: ')):
@@ -1057,6 +1057,34 @@ def increment_path(path, exist_ok=False, sep='', mkdir=False):
 
     return path
 
+import subprocess as sp
+import os
+from threading import Timer
+
+def get_gpu_memory():
+    output_to_list = lambda x: x.decode('ascii').split('\n')[:-1]
+    mem_used = "nvidia-smi --query-gpu=memory.used --format=csv"
+    mem_total = "nvidia-smi --query-gpu=memory.total --format=csv"
+    mem_free = "nvidia-smi --query-gpu=memory.free --format=csv"
+    try:
+        memory_use_info = output_to_list(sp.check_output(mem_used.split(),stderr=sp.STDOUT))[1:]
+        memory_total_info = output_to_list(sp.check_output(mem_total.split(),stderr=sp.STDOUT))[1:]
+        memory_free_info = output_to_list(sp.check_output(mem_free.split(),stderr=sp.STDOUT))[1:]
+    except sp.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+    memory_use_values = [int(x.split()[0])/1e3 for x in memory_use_info]
+    memory_total_values = [int(x.split()[0])/1e3 for x in memory_total_info]
+    memory_free_values = [int(x.split()[0])/1e3 for x in memory_free_info]
+    res = f"GPU memory: {memory_use_values[0]:.1f}/{memory_total_values[0]:.1f} GB (free: {memory_free_values[0]:.1f} GB)"
+    return res
+
+
+def print_gpu_memory(t=1):
+    """
+        This function calls itself every second and print the gpu_memory.
+    """
+    Timer(t, print_gpu_memory).start()
+    print(get_gpu_memory())
 
 # OpenCV Chinese-friendly functions ------------------------------------------------------------------------------------
 imshow_ = cv2.imshow  # copy to avoid recursion errors

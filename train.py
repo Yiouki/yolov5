@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import psutil
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -50,7 +51,7 @@ from utils.downloads import attempt_download, is_url
 from utils.general import (LOGGER, check_amp, check_dataset, check_file, check_git_status, check_img_size,
                            check_requirements, check_suffix, check_yaml, colorstr, get_latest_run, increment_path,
                            init_seeds, intersect_dicts, labels_to_class_weights, labels_to_image_weights, methods,
-                           one_cycle, print_args, print_mutation, strip_optimizer, yaml_save)
+                           one_cycle, print_args, print_gpu_memory, print_mutation, strip_optimizer, yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
@@ -122,7 +123,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     if pretrained:
         with torch_distributed_zero_first(LOCAL_RANK):
             weights = attempt_download(weights)  # download if not found locally
-        ckpt = torch.load(weights, map_location='cpu')  # load checkpoint to CPU to avoid CUDA memory leak
+        ckpt = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
@@ -150,6 +151,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     if RANK == -1 and batch_size == -1:  # single-GPU only, estimate best batch size
         batch_size = check_train_batch_size(model, imgsz, amp)
         loggers.on_params_update({"batch_size": batch_size})
+        opt.batch_size_use = batch_size
+        yaml_save(save_dir / 'opt.yaml', vars(opt))  # Save with the update of opt values
 
     # Optimizer
     nbs = 64  # nominal batch size
@@ -185,6 +188,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         LOGGER.info('Using SyncBatchNorm()')
 
+    print(f'(-1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     # Trainloader
     train_loader, dataset = create_dataloader(train_path,
                                               imgsz,
@@ -205,6 +209,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
+    print(f'(0) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     # Process 0
     if RANK in {-1, 0}:
         val_loader = create_dataloader(val_path,
@@ -226,23 +231,34 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             model.half().float()  # pre-reduce anchor precision
 
         callbacks.run('on_pretrain_routine_end', labels, names)
+    print(f'(1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     # DDP mode
     if cuda and RANK != -1:
         model = smart_DDP(model)
+    print(f'(2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     # Model attributes
     nl = de_parallel(model).model[-1].nl  # number of detection layers (to scale hyps)
+    print(f'(2 - 1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['box'] *= 3 / nl  # scale to layers
+    print(f'(2 - 2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['cls'] *= nc / 80 * 3 / nl  # scale to classes and layers
+    print(f'(2 - 3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['obj'] *= (imgsz / 640) ** 2 * 3 / nl  # scale to image size and layers
+    print(f'(2 - 4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['label_smoothing'] = opt.label_smoothing
+    print(f'(2 - 5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.nc = nc  # attach number of classes to model
+    print(f'(2 - 6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.hyp = hyp  # attach hyperparameters to model
+    print(f'(2 - 7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
+    print(f'(2 - 8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.names = names
+    print(f'(3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
-    if opt.debug_finetuning: # not opt.finetuning and 
+    if not opt.finetuning and opt.debug_finetuning and not resume:
         print('Save initial model')
         model_save(model, Path(opt.save_dir) / "weights", "debug_weights_init", anchors="anchors_init")
 
@@ -264,15 +280,18 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs - start_epoch} epochs...')
+    print(f'(4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         callbacks.run('on_train_epoch_start')
         model.train()
+        print(f'(5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # Update image weights (optional, single-GPU only)
         if opt.image_weights:
             cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2 / nc  # class weights
             iw = labels_to_image_weights(dataset.labels, nc=nc, class_weights=cw)  # image weights
             dataset.indices = random.choices(range(dataset.n), weights=iw, k=dataset.n)  # rand weighted idx\n\n')
+        print(f'(6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # Update mosaic border (optional)
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
@@ -286,11 +305,15 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
+        print(f'(7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
+        # print(f'\n\tDEBUG DATALOADER: 0')
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+            print(f'(train) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
+            print(f'(8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
             # Warmup
             if ni <= nw:
@@ -343,6 +366,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 callbacks.run('on_train_batch_end', model, ni, imgs, targets, paths, list(mloss))
                 if callbacks.stop_training:
                     return
+
+            # Free some memory
+            del imgs, pred, loss, loss_items
             # end batch ------------------------------------------------------------------------------------------------
 
         # Scheduler
@@ -412,7 +438,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # end training -----------------------------------------------------------------------------------------------------
 
     # DEBUG save weights of layers into a NPY files in order to compare it after the reloading
-    if opt.debug_finetuning: # not opt.finetuning and 
+    if not opt.finetuning and opt.debug_finetuning and not resume:
         model_save(model, Path(opt.save_dir) / "weights", "debug_weights", anchors="anchors")
 
     if RANK in {-1, 0}:
@@ -520,10 +546,10 @@ def main(opt, callbacks=Callbacks()):
         opt_yaml = last.parent.parent / 'opt.yaml'  # train options yaml
         opt_data = opt.data  # original dataset
 
-        opt_finetuning, opt_device, opt_recurrent_save, opt_lr0, opt_bs = opt.finetuning, opt.device, opt.recurrent_save, opt.lr0, opt.batch_size
+        opt_finetuning, opt_device, opt_recurrent_save, opt_lr0, opt_bs, opt_epochs, opt_cache = opt.finetuning, opt.device, opt.recurrent_save, opt.lr0, opt.batch_size, opt.epochs, opt.cache
         opt_debug_finetuning = opt.debug_finetuning
-        if opt.project and opt.name:
-            opt_savedir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))
+        if opt.finetuning and opt.project and opt.name:
+            opt_savedir = str(Path(opt.project) / opt.name)  # str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok, sep='_'))
 
         if opt_yaml.is_file():
             with open(opt_yaml, errors='ignore') as f:
@@ -531,13 +557,15 @@ def main(opt, callbacks=Callbacks()):
         else:
             d = torch.load(last, map_location='cpu')['opt']
         opt = argparse.Namespace(**d)  # replace
-        opt.cfg, opt.weights, opt.resume = '', str(last), True  # reinstate
+        opt.cfg, opt.weights, opt.resume, opt.epochs = '', str(last), True, opt_epochs  # reinstate
 
+        print(f'\n\tDEBUG: Change batch size from {opt.batch_size} to {opt_bs}')
+        opt.batch_size, opt.cache = opt_bs, opt_cache
         if opt_finetuning:
             opt.finetuning, opt.data, opt.device, opt.recurrent_save, opt.lr0, opt.batch_size, opt.save_dir = \
                 opt_finetuning, opt_data, opt_device, opt_recurrent_save, opt_lr0, opt_bs, opt_savedir
             opt.debug_finetuning = opt_debug_finetuning
-            opt.save_dir = str(increment_path(Path(opt_project) / opt_name, exist_ok=opt.exist_ok))
+            opt.save_dir = str(increment_path(Path(opt_project) / opt_name, exist_ok=opt.exist_ok, sep='_'))
 
         if is_url(opt_data):
             opt.data = check_file(opt_data)  # avoid HUB resume auth timeout
@@ -551,8 +579,8 @@ def main(opt, callbacks=Callbacks()):
             opt.exist_ok, opt.resume = opt.resume, False  # pass resume to exist_ok and disable resume
         if opt.name == 'cfg':
             opt.name = Path(opt.cfg).stem  # use model.yaml as name
-        opt.name = f"{opt.name}_noFreeze" if len(opt.freeze) > 0 else f"{opt.name}_freeze{opt.freeze}"
-        opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))
+        opt.name = f"{opt.name}_noFreeze" if len(opt.freeze) <= 1 else f"{opt.name}_freeze{opt.freeze}"
+        opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok, sep='_'))
 
     # DDP mode
     device = select_device(opt.device, batch_size=opt.batch_size)

@@ -1,6 +1,6 @@
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 """
-Dataloaders and dataset utils
+    Dataloaders and dataset utils
 """
 
 import contextlib
@@ -140,7 +140,10 @@ def create_dataloader(path,
     sampler = None if rank == -1 else distributed.DistributedSampler(dataset, shuffle=shuffle)
     loader = DataLoader if image_weights else InfiniteDataLoader  # only DataLoader allows for attribute updates
     generator = torch.Generator()
-    generator.manual_seed(6148914691236517205 + RANK)
+    generator.manual_seed(6148914691236517205 + RANK) # 6148914691236517205 + RANK
+    print(f'\n\tDEBUG: loader =\n\t\tdataset:{dataset}\n\t\tbs={batch_size}\n\t\tshuffle={shuffle and sampler is None}\n\t\tworkers={nw}\n\t\t \
+            sampler={sampler}\n\t\tpin_memory={PIN_MEMORY}\n\t\tcollate_fn={LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn}\n\t\t \
+            worker_init_fn={seed_worker}\n\t\tgenerator={generator}')
     return loader(dataset,
                   batch_size=batch_size,
                   shuffle=shuffle and sampler is None,
@@ -618,6 +621,7 @@ class LoadImagesAndLabels(Dataset):
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
+        # print(f"\n\tDEBUG: Process image '{self.npy_files[index]}'")
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']

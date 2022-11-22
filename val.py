@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import psutil
 import torch
 from tqdm import tqdm
 
@@ -141,7 +142,7 @@ def run(
         device = select_device(device, batch_size=batch_size)
 
         # Directories
-        save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
+        save_dir = increment_path(Path(project) / name, exist_ok=exist_ok, sep='_')  # increment run
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Loggers
@@ -209,6 +210,7 @@ def run(
     callbacks.run('on_val_start')
     pbar = tqdm(dataloader, desc=s, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
     for batch_i, (im, targets, paths, shapes) in enumerate(pbar):
+        print(f'(val) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
         callbacks.run('on_val_batch_start')
         with dt[0]:
             if cuda:
