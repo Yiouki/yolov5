@@ -81,8 +81,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     if isinstance(hyp, str):
         with open(hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
-    if opt.lr0:  # If there is a LR enter by the user, overwrite it
-        hyp['lr0'] = float(opt.lr0)
     LOGGER.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     opt.hyp = hyp.copy()  # for saving hyps to checkpoints
 
@@ -104,6 +102,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         data_dict = loggers.remote_dataset
         if resume:  # If resuming runs from remote artifact
             weights, epochs, hyp, batch_size = opt.weights, opt.epochs, opt.hyp, opt.batch_size
+        if opt.lr0:  # If there is a LR enter by the user, overwrite it
+            hyp['lr0'] = float(opt.lr0)
 
     # Config
     plots = not evolve and not opt.noplots  # create plots
@@ -188,7 +188,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         LOGGER.info('Using SyncBatchNorm()')
 
-    print(f'(-1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(-1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     # Trainloader
     train_loader, dataset = create_dataloader(train_path,
                                               imgsz,
@@ -209,7 +210,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
-    print(f'(0) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(0) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     # Process 0
     if RANK in {-1, 0}:
         val_loader = create_dataloader(val_path,
@@ -231,32 +233,43 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             model.half().float()  # pre-reduce anchor precision
 
         callbacks.run('on_pretrain_routine_end', labels, names)
-    print(f'(1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     # DDP mode
     if cuda and RANK != -1:
         model = smart_DDP(model)
-    print(f'(2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     # Model attributes
     nl = de_parallel(model).model[-1].nl  # number of detection layers (to scale hyps)
-    print(f'(2 - 1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['box'] *= 3 / nl  # scale to layers
-    print(f'(2 - 2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['cls'] *= nc / 80 * 3 / nl  # scale to classes and layers
-    print(f'(2 - 3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['obj'] *= (imgsz / 640) ** 2 * 3 / nl  # scale to image size and layers
-    print(f'(2 - 4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['label_smoothing'] = opt.label_smoothing
-    print(f'(2 - 5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.nc = nc  # attach number of classes to model
-    print(f'(2 - 6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.hyp = hyp  # attach hyperparameters to model
-    print(f'(2 - 7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
-    print(f'(2 - 8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(2 - 8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.names = names
-    print(f'(3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     if not opt.finetuning and opt.debug_finetuning and not resume:
         print('Save initial model')
@@ -280,18 +293,21 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs - start_epoch} epochs...')
-    print(f'(4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+    if opt.debug_finetuning:
+        print(f'(4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         callbacks.run('on_train_epoch_start')
         model.train()
-        print(f'(5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+        if opt.debug_finetuning:
+            print(f'(5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # Update image weights (optional, single-GPU only)
         if opt.image_weights:
             cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2 / nc  # class weights
             iw = labels_to_image_weights(dataset.labels, nc=nc, class_weights=cw)  # image weights
             dataset.indices = random.choices(range(dataset.n), weights=iw, k=dataset.n)  # rand weighted idx\n\n')
-        print(f'(6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+        if opt.debug_finetuning:
+            print(f'(6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # Update mosaic border (optional)
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
@@ -305,15 +321,18 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
-        print(f'(7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+        if opt.debug_finetuning:
+            print(f'(7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # print(f'\n\tDEBUG DATALOADER: 0')
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
-            print(f'(train) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+            if opt.debug_finetuning:
+                print(f'(train) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
-            print(f'(8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
+            if opt.debug_finetuning:
+                print(f'(8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
             # Warmup
             if ni <= nw:
