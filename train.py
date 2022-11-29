@@ -125,6 +125,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             weights = attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        ema_weights = [f for f in a.parent.glob('*') if "EMA" in f.stem]
+        if len(ema_weights) > 0:
+            ckpt_ema = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
+            model_ema = Model(ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
@@ -168,7 +172,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # EMA
-    ema = ModelEMA(model) if RANK in {-1, 0} else None
+    ema = ModelEMA(model_ema or model, noema=opt.noema) if RANK in {-1, 0} else None
 
     # Resume
     best_fitness, start_epoch = 0.0, 0
@@ -188,7 +192,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         LOGGER.info('Using SyncBatchNorm()')
 
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(-1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     # Trainloader
     train_loader, dataset = create_dataloader(train_path,
@@ -210,7 +214,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(0) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     # Process 0
     if RANK in {-1, 0}:
@@ -233,42 +237,42 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             model.half().float()  # pre-reduce anchor precision
 
         callbacks.run('on_pretrain_routine_end', labels, names)
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     # DDP mode
     if cuda and RANK != -1:
         model = smart_DDP(model)
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     # Model attributes
     nl = de_parallel(model).model[-1].nl  # number of detection layers (to scale hyps)
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 1) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['box'] *= 3 / nl  # scale to layers
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 2) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['cls'] *= nc / 80 * 3 / nl  # scale to classes and layers
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['obj'] *= (imgsz / 640) ** 2 * 3 / nl  # scale to image size and layers
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     hyp['label_smoothing'] = opt.label_smoothing
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.nc = nc  # attach number of classes to model
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.hyp = hyp  # attach hyperparameters to model
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(2 - 8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     model.names = names
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(3) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
     if not opt.finetuning and opt.debug_finetuning and not resume:
@@ -293,12 +297,12 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs - start_epoch} epochs...')
-    if opt.debug_finetuning:
+    if opt.verbose_debug:
         print(f'(4) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         callbacks.run('on_train_epoch_start')
         model.train()
-        if opt.debug_finetuning:
+        if opt.verbose_debug:
             print(f'(5) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # Update image weights (optional, single-GPU only)
@@ -306,7 +310,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2 / nc  # class weights
             iw = labels_to_image_weights(dataset.labels, nc=nc, class_weights=cw)  # image weights
             dataset.indices = random.choices(range(dataset.n), weights=iw, k=dataset.n)  # rand weighted idx\n\n')
-        if opt.debug_finetuning:
+        if opt.verbose_debug:
             print(f'(6) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # Update mosaic border (optional)
@@ -321,17 +325,17 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
-        if opt.debug_finetuning:
+        if opt.verbose_debug:
             print(f'(7) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
         # print(f'\n\tDEBUG DATALOADER: 0')
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
-            if opt.debug_finetuning:
+            if opt.verbose_debug:
                 print(f'(train) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
-            if opt.debug_finetuning:
+            if opt.verbose_debug:
                 print(f'(8) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
 
             # Warmup
@@ -399,7 +403,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             callbacks.run('on_train_epoch_end', epoch=epoch)
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
             final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
-            if not noval or final_epoch:  # Calculate mAP
+            if epoch % opt.val_period == 0 or not noval or final_epoch:  # Calculate mAP
                 results, maps, _ = validate.run(epoch=epoch,
                                                 data=data_dict,
                                                 batch_size=batch_size // WORLD_SIZE * 2,
@@ -423,7 +427,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)  # Save into results.csv
 
             # Save model
-            if (not nosave) or (final_epoch and not evolve):  # if save
+            if epoch % opt.val_period == 0 or (not nosave) or (final_epoch and not evolve):  # if save
                 ckpt = {
                     'epoch': epoch,
                     'best_fitness': best_fitness,
@@ -464,7 +468,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
         for f in last, best:
             if f.exists():
-                s = Path(f).parent / f'{Path(f).stem}_endTraining.pt'
+                s = Path(f).parent / f'{Path(f).stem}_EMA.pt'
                 f = strip_optimizer(f, s)  # strip optimizers
                 if f is best:
                     LOGGER.info(f'\nValidating {f} ...')
@@ -495,6 +499,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
+    parser.add_argument('--verbose-debug', action='store_true', help='To display multi print to debug')
+
     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
@@ -509,6 +515,7 @@ def parse_opt(known=False):
     # parser.add_argument('--save-end-training', action='store_true', help='save after training is finish')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--noval', action='store_true', help='only validate final epoch')
+    parser.add_argument('--noema', action='store_true', help='remove the decay of the EMA model')
     parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
     parser.add_argument('--noplots', action='store_true', help='save no plot files')
     parser.add_argument('--evolve', type=int, nargs='?', const=300, help='evolve hyperparameters for x generations')
@@ -532,8 +539,9 @@ def parse_opt(known=False):
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
     parser.add_argument('--recurrent-save', action='store_true', help='Save results every epoch and more data')
-    parser.add_argument('--results-period', type=int, default=-1, help='Save results every x epochs')
+    parser.add_argument('--results-period', type=int, default=-1, help='Save results every x epochs (disabled if < 1)')
     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
+    parser.add_argument('--val-period', type=int, default=1, help='Validation every x epochs')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
 
@@ -566,7 +574,7 @@ def main(opt, callbacks=Callbacks()):
         opt_data = opt.data  # original dataset
 
         opt_finetuning, opt_device, opt_recurrent_save, opt_lr0, opt_bs, opt_epochs, opt_cache = opt.finetuning, opt.device, opt.recurrent_save, opt.lr0, opt.batch_size, opt.epochs, opt.cache
-        opt_debug_finetuning = opt.debug_finetuning
+        opt_debug_finetuning, opt_verbose_debug = opt.debug_finetuning, opt.verbose_debug
         if opt.finetuning and opt.project and opt.name:
             opt_savedir = str(Path(opt.project) / opt.name)  # str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok, sep='_'))
 
@@ -582,8 +590,8 @@ def main(opt, callbacks=Callbacks()):
         opt.batch_size, opt.cache = opt_bs, opt_cache
         if opt_finetuning:
             opt.finetuning, opt.data, opt.device, opt.recurrent_save, opt.lr0, opt.batch_size, opt.save_dir = \
-                opt_finetuning, opt_data, opt_device, opt_recurrent_save, opt_lr0, opt_bs, opt_savedir
-            opt.debug_finetuning = opt_debug_finetuning
+                opt_finetuning, check_file(opt_data), opt_device, opt_recurrent_save, opt_lr0, opt_bs, opt_savedir
+            opt.debug_finetuning, opt.verbose_debug = opt_debug_finetuning, opt_verbose_debug
             opt.save_dir = str(increment_path(Path(opt_project) / opt_name, exist_ok=opt.exist_ok, sep='_'))
 
         if is_url(opt_data):
