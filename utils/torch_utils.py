@@ -449,7 +449,8 @@ class ModelEMA:
     def update(self, model):
         # Update EMA parameters
         self.updates += 1
-        d = self.decay(self.updates)
+        # d = self.decay(self.updates)
+        d = 0
 
         msd = de_parallel(model).state_dict()  # model state_dict
         for k, v in self.ema.state_dict().items():
