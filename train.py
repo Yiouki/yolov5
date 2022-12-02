@@ -125,10 +125,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             weights = attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
-        ema_weights = [f for f in a.parent.glob('*') if "EMA" in f.stem]
-        if len(ema_weights) > 0:
-            ckpt_ema = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
-            model_ema = Model(ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
+        # ema_weights = [f for f in weights.parent.glob('*') if "EMA" in f.stem]
+        # if len(ema_weights) > 0:
+        #     ckpt_ema = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
+        #     model_ema = Model(ckpt_ema['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
@@ -172,7 +172,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # EMA
-    ema = ModelEMA(model_ema or model, noema=opt.noema) if RANK in {-1, 0} else None
+    ema = ModelEMA(model, noema=opt.noema) if RANK in {-1, 0} else None
 
     # Resume
     best_fitness, start_epoch = 0.0, 0
