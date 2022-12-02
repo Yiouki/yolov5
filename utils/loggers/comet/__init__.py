@@ -394,8 +394,6 @@ class CometLogger:
         return
 
     def on_train_batch_start(self):
-        print(f'RAM memory: {psutil.virtual_memory()[2]}%')
-        print(f'RAM Used: {psutil.virtual_memory()[3]/10e8} Go')
         return
 
     def on_train_batch_end(self, log_dict, step):

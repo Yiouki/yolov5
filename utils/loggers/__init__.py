@@ -76,6 +76,7 @@ class Loggers():
             'train/cls_loss',  # train loss
             'metrics/precision',
             'metrics/recall',
+            'metrics/f1_score',
             'metrics/mAP_0.5',
             'metrics/mAP_0.5:0.95',  # metrics
             'val/box_loss',
