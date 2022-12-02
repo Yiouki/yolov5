@@ -141,9 +141,6 @@ def create_dataloader(path,
     loader = DataLoader if image_weights else InfiniteDataLoader  # only DataLoader allows for attribute updates
     generator = torch.Generator()
     generator.manual_seed(6148914691236517205 + RANK) # 6148914691236517205 + RANK
-    print(f'\n\tDEBUG: loader =\n\t\tdataset:{dataset}\n\t\tbs={batch_size}\n\t\tshuffle={shuffle and sampler is None}\n\t\tworkers={nw}\n\t\t \
-            sampler={sampler}\n\t\tpin_memory={PIN_MEMORY}\n\t\tcollate_fn={LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn}\n\t\t \
-            worker_init_fn={seed_worker}\n\t\tgenerator={generator}')
     return loader(dataset,
                   batch_size=batch_size,
                   shuffle=shuffle and sampler is None,
