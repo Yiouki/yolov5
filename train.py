@@ -134,6 +134,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             model_ema = Model(ckpt_ema['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
         else:
             model_ema = None
+
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
