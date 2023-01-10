@@ -66,6 +66,7 @@ def run(
         agnostic_nms=False,  # class-agnostic NMS
         augment=False,  # augmented inference
         visualize=False,  # visualize features
+        feature_vectors=False,  # save feature vectors of the backbone
         update=False,  # update all models
         project=ROOT / 'runs/detect',  # save results to project/name
         name='exp',  # save results to project/name
@@ -78,7 +79,7 @@ def run(
         vid_stride=1,  # video frame-rate stride
 ):
     source = str(source)
-    save_img = not nosave and not source.endswith('.txt')  # save inference images
+    save_img = not nosave #and not source.endswith('.txt')  # save inference images
     is_text = source.endswith('.txt') 
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
@@ -125,7 +126,8 @@ def run(
         # Inference
         with dt[1]:
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-            pred = model(im, augment=augment, visualize=visualize)
+            vectors = increment_path(save_dir / "feature_vectors" / Path(path).stem, mkdir=True) if feature_vectors else False
+            pred = model(im, augment=augment, visualize=visualize, vectors=(9, vectors))
 
         # NMS
         with dt[2]:
@@ -240,6 +242,7 @@ def parse_opt():
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--visualize', action='store_true', help='visualize features')
+    parser.add_argument('--feature_vectors', action='store_true', help='extract the backbone of the model')
     parser.add_argument('--update', action='store_true', help='update all models')
     parser.add_argument('--project', default=ROOT / 'runs/detect', help='save results to project/name')
     parser.add_argument('--name', default='exp', help='save results to project/name')
@@ -263,4 +266,16 @@ def main(opt):
 
 if __name__ == "__main__":
     opt = parse_opt()
+
+    # DEBUG reunion
+    # opt.weights = "/home/hruiz/Results_AL/Refs_onlyReal/Ref_onlyReal_CV1_bs256_350epochs_noFreeze/weights/last.pt"
+    # opt.source = "/home/hruiz/codes/yolov5_perso/datasets/DEBUG_dataset/dgx_dataset.txt"
+    # opt.visualize = False
+    # opt.feature_vectors = True
+    # opt.save_txt = True
+    # opt.save_conf = True
+    # opt.conf_thres = 0.1
+    # opt.project = "/home/hruiz/Results_AL/DEBUG_feature_vectors"
+    # opt.name = "tst_msi"
+
     main(opt)

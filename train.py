@@ -127,7 +127,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         ckpt = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         ema_weights = [f for f in Path(weights).parent.glob('*') if re.findall(r'ema|endtraining', f.stem, re.IGNORECASE)]
-        if len(ema_weights) > 0:
+        if ckpt['ema']:
+            model_ema = Model(ckpt['ema'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
+        elif len(ema_weights) > 0: # There is a EMA in the ckpt
             ckpt_ema = torch.load(weights, map_location=torch.device('cpu'))  # load checkpoint to CPU to avoid CUDA memory leak
             model_ema = Model(ckpt_ema['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
         else:
@@ -170,12 +172,14 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # Scheduler
     if opt.cos_lr:
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
+    elif opt.constant_lr:
+        lf = lambda x:1
     else:
         lf = lambda x: (1 - x / epochs) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf, verbose=opt.constant_lr and opt.verbose_debug)  # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # EMA
-    ema = ModelEMA(model_ema or model, noema=opt.noema) if RANK in {-1, 0} else None
+    ema = ModelEMA(model_ema or model, ema=(opt.noema, opt.ema_decay)) if RANK in {-1, 0} else None
 
     # Resume
     best_fitness, start_epoch = 0.0, 0
@@ -297,7 +301,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
 
-        # print(f'\n\tDEBUG DATALOADER: 0')
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             # print(f'(train) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
             callbacks.run('on_train_batch_start')
@@ -482,6 +485,7 @@ def parse_opt(known=False):
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--noval', action='store_true', help='only validate final epoch')
     parser.add_argument('--noema', action='store_true', help='remove the decay of the EMA model')
+    parser.add_argument('--ema-decay', type=float, help='choose the decay value of the EMA model')
     parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
     parser.add_argument('--noplots', action='store_true', help='save no plot files')
     parser.add_argument('--evolve', type=int, nargs='?', const=300, help='evolve hyperparameters for x generations')
@@ -500,6 +504,7 @@ def parse_opt(known=False):
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--lr0', help='initial learning rate (default=0.01)')
     parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')
+    parser.add_argument('--constant-lr', action='store_true', help='constant LR scheduler')
     parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
     parser.add_argument('--early-stop', action='store_true', help='To enable EarlyStopping (to combine with patience)')
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
@@ -537,10 +542,11 @@ def main(opt, callbacks=Callbacks()):
         opt_project, opt_name = opt.project, opt.name
         last = Path(check_file(opt.resume) if isinstance(opt.resume, str) else get_latest_run())
         opt_yaml = last.parent.parent / 'opt.yaml'  # train options yaml
-        opt_data = opt.data  # original dataset
+        opt_data, opt_constant_lr = opt.data, opt.constant_lr  # original dataset
 
-        opt_finetuning, opt_device, opt_recurrent_save, opt_val_period, opt_noema, opt_lr0, opt_bs, opt_epochs, opt_cache = \
-            opt.finetuning, opt.device, opt.recurrent_save, opt.val_period, opt.noema, opt.lr0, opt.batch_size, opt.epochs, opt.cache
+        opt_finetuning, opt_device, opt_recurrent_save, opt_val_period, opt_save_period, opt_lr0, opt_bs, opt_epochs, opt_cache = \
+            opt.finetuning, opt.device, opt.recurrent_save, opt.val_period, opt.save_period, opt.lr0, opt.batch_size, opt.epochs, opt.cache
+        opt_noema, opt_ema_decay = opt.noema, opt.ema_decay
         opt_debug_finetuning, opt_verbose_debug = opt.debug_finetuning, opt.verbose_debug
         if opt.finetuning and opt.project and opt.name:
             opt_savedir = str(Path(opt.project) / opt.name)  # str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok, sep='_'))
@@ -556,8 +562,10 @@ def main(opt, callbacks=Callbacks()):
         print(f'\n\tDEBUG: Change batch size from {opt.batch_size} to {opt_bs}')
         opt.batch_size, opt.cache = opt_bs, opt_cache
         if opt_finetuning:
-            opt.finetuning, opt.data, opt.device, opt.recurrent_save, opt.val_period, opt.noema, opt.lr0, opt.batch_size, opt.save_dir = \
-                opt_finetuning, check_file(opt_data), opt_device, opt_recurrent_save, opt_val_period, opt_noema, opt_lr0, opt_bs, opt_savedir
+            opt.finetuning, opt.data, opt.device, opt.recurrent_save, opt.val_period, opt.save_period, opt.lr0, opt.batch_size, opt.save_dir = \
+                opt_finetuning, check_file(opt_data), opt_device, opt_recurrent_save, opt_val_period, opt_save_period, opt_lr0, opt_bs, opt_savedir
+            opt.noema, opt.ema_decay = opt_noema, opt_ema_decay
+            opt.constant_lr = opt_constant_lr
             opt.debug_finetuning, opt.verbose_debug = opt_debug_finetuning, opt_verbose_debug
             opt.save_dir = str(increment_path(Path(opt_project) / opt_name, exist_ok=opt.exist_ok, sep='_'))
 
@@ -573,7 +581,7 @@ def main(opt, callbacks=Callbacks()):
             opt.exist_ok, opt.resume = opt.resume, False  # pass resume to exist_ok and disable resume
         if opt.name == 'cfg':
             opt.name = Path(opt.cfg).stem  # use model.yaml as name
-        opt.name = f"{opt.name}_noFreeze" if len(opt.freeze) <= 1 else f"{opt.name}_freeze{opt.freeze}"
+        opt.name = opt.name if len(opt.freeze) <= 1 else f"{opt.name}_freeze{opt.freeze}" # f"{opt.name}_noFreeze"
         opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok, sep='_'))
 
     # DDP mode
