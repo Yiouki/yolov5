@@ -75,7 +75,8 @@ class Detect(nn.Module):
                     wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
-
+        l = [zz.shape for zz in z]
+        # print(f"\nDetect layer: {z} | {l}\n")
         return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
 
     def _make_grid(self, nx=20, ny=20, i=0, torch_1_10=check_version(torch.__version__, '1.10.0')):
@@ -121,7 +122,7 @@ class BaseModel(nn.Module):
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize, vectors_dir=vectors)
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
             if vectors and vectors[-1]:
                 layer, vectors_dir = vectors
                 if m.i == layer:
