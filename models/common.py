@@ -501,7 +501,8 @@ class DetectMultiBackend(nn.Module):
             im = im.permute(0, 2, 3, 1)  # torch BCHW to numpy BHWC shape(1,320,192,3)
 
         if self.pt:  # PyTorch
-            y = self.model(im, augment=augment, visualize=visualize, vectors=vectors) if augment or visualize or vectors else self.model(im)
+            vect = vectors if isinstance(vectors, bool) else vectors[-1]
+            y = self.model(im, augment=augment, visualize=visualize, vectors=vectors) if augment or visualize or vect else self.model(im)
         elif self.jit:  # TorchScript
             y = self.model(im)
         elif self.dnn:  # ONNX OpenCV DNN
@@ -569,6 +570,7 @@ class DetectMultiBackend(nn.Module):
             y = [x if isinstance(x, np.ndarray) else x.numpy() for x in y]
             y[0][..., :4] *= [w, h, w, h]  # xywh normalized to pixels
 
+        # print(f'\nDetectMultiBackend: {y} | {y[0].shape}')
         if isinstance(y, (list, tuple)):
             return self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]
         else:

@@ -63,14 +63,23 @@ class Ensemble(nn.ModuleList):
         super().__init__()
 
     def forward(self, x, augment=False, profile=False, visualize=False):
-        y = [module(x, augment, profile, visualize)[0] for module in self]
+        # To add the number of ensemble in the first column
+        y = []
+        for i, module in enumerate(self):
+            d = module(x, augment, profile, visualize)[0]
+            c = torch.tensor(np.full(list(d.shape)[:-1] + [1], i + 1)).to(d.device)
+            y.append(torch.cat((c, d), dim=-1))
+            # print(f'\nEnsemble: {d} | {d.shape}')
+            # y.append(d)
+        
+        # y = [module(x, augment, profile, visualize)[0] for module in self]
         # y = torch.stack(y).max(0)[0]  # max ensemble
         # y = torch.stack(y).mean(0)  # mean ensemble
         y = torch.cat(y, 1)  # nms ensemble
         return y, None  # inference, train output
 
 
-def attempt_load(weights, device=None, inplace=True, fuse=True):
+def attempt_load(weights, device=None, inplace=True, fuse=True, split_grid=False):
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
     from models.yolo import Detect, Model
 
@@ -93,8 +102,8 @@ def attempt_load(weights, device=None, inplace=True, fuse=True):
         if t in (nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Model):
             m.inplace = inplace  # torch 1.7.0 compatibility
             if t is Detect and not isinstance(m.anchor_grid, list):
-                delattr(m, 'anchor_grid')
-                setattr(m, 'anchor_grid', [torch.zeros(1)] * m.nl)
+                    delattr(m, 'anchor_grid')
+                    setattr(m, 'anchor_grid', [torch.zeros(1)] * m.nl)
         elif t is nn.Upsample and not hasattr(m, 'recompute_scale_factor'):
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility
 
