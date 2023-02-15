@@ -43,7 +43,8 @@ from models.common import DetectMultiBackend
 from models.experimental import Ensemble
 from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadScreenshots, LoadStreams
 from utils.general import (LOGGER, Profile, check_file, check_img_size, check_imshow, check_requirements, colorstr, cv2,
-                           increment_path, non_max_suppression, nms_per_grid, print_args, scale_boxes, strip_optimizer, xyxy2xywh)
+                           increment_path, save_inference_ensemble, non_max_suppression, nms_per_grid,
+                           print_args, scale_boxes, strip_optimizer, xyxy2xywh)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, smart_inference_mode
 
@@ -130,18 +131,19 @@ def run(
         with dt[1]:
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
             vectors = increment_path(save_dir / "feature_vectors" / Path(path).stem, mkdir=True) if feature_vectors else False
-            pred_init = model(im, augment=augment, visualize=visualize, vectors=(9, vectors))
+            pred = model(im, augment=augment, visualize=visualize, vectors=(9, vectors))
 
         # print(pred, pred.shape)
         # toto()
 
         # NMS
         with dt[2]:
-            if isinstance(model.model, Ensemble):
-                pred = nms_per_grid(pred_init, conf_thres, iou_thres, classes, max_det=max_det,
-                                        merge= merge, vote=vote)
-            else:
-                pred = non_max_suppression(pred_init, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+            # if isinstance(model.model, Ensemble):
+            #     pred = nms_per_grid(pred_init, conf_thres, iou_thres, classes, max_det=max_det,
+            #                         merge= merge, vote=vote)
+            # else:
+            pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det,
+                                       save_dir=save_dir)
 
 
         # Second-stage classifier (optional)
@@ -264,8 +266,6 @@ def parse_opt():
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
-    parser.add_argument('--merge', action='store_true', help='merge boxes in NMS')
-    parser.add_argument('--vote', action='store_true', help='use vote system in NMS if there is an ensemble of models')
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
