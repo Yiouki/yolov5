@@ -6,6 +6,7 @@ Model validation metrics
 import math
 import warnings
 from pathlib import Path
+import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,7 +29,7 @@ def smooth(y, f=0.05):
     return np.convolve(yp, np.ones(nf) / nf, mode='valid')  # y-smoothed
 
 
-def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names=(), eps=1e-16, prefix=""):
+def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names=(), eps=1e-16, prefix="", save_pr_data=False):
     """ Compute the average precision, given the recall and precision curves.
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
     # Arguments
@@ -83,7 +84,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names
     names = [v for k, v in names.items() if k in unique_classes]  # list: only classes that have data
     names = dict(enumerate(names))  # to dict
     if plot:
-        plot_pr_curve(px, py, ap, Path(save_dir) / f'{prefix}PR_curve.png', names)
+        plot_pr_curve(px, py, ap, Path(save_dir) / f'{prefix}PR_curve.png', names, save_pr_data=save_pr_data)
         plot_mc_curve(px, f1, Path(save_dir) / f'{prefix}F1_curve.png', names, ylabel='F1')
         plot_mc_curve(px, p, Path(save_dir) / f'{prefix}P_curve.png', names, ylabel='Precision')
         plot_mc_curve(px, r, Path(save_dir) / f'{prefix}R_curve.png', names, ylabel='Recall')
@@ -323,7 +324,7 @@ def wh_iou(wh1, wh2, eps=1e-7):
 
 
 @threaded
-def plot_pr_curve(px, py, ap, save_dir=Path('pr_curve.png'), names=()):
+def plot_pr_curve(px, py, ap, save_dir=Path('pr_curve.png'), names=(), save_pr_data=False):
     # Precision-recall curve
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
     py = np.stack(py, axis=1)
@@ -343,6 +344,10 @@ def plot_pr_curve(px, py, ap, save_dir=Path('pr_curve.png'), names=()):
     ax.set_title('Precision-Recall Curve')
     fig.savefig(save_dir, dpi=250)
     plt.close(fig)
+
+    if save_pr_data:
+        np.save(save_dir.parent / f"pr_data_px.npy", px)
+        np.save(save_dir.parent / f"pr_data_py.npy", py)
 
 
 @threaded

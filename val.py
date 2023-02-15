@@ -238,7 +238,8 @@ def run(
                                         labels=lb,
                                         multi_label=True,
                                         agnostic=single_cls,
-                                        max_det=max_det)
+                                        max_det=max_det,
+                                        save_dir=save_dir)
 
         # Metrics
         for si, pred in enumerate(preds):
@@ -290,7 +291,7 @@ def run(
     # Compute metrics
     stats = [torch.cat(x, 0).cpu().numpy() for x in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
-        tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names)
+        tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names, save_pr_data=True)
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, mf1, map50, map = p.mean(), r.mean(), f1.mean(), ap50.mean(), ap.mean()
     nt = np.bincount(stats[3].astype(int), minlength=nc)  # number of targets per class
