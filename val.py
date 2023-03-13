@@ -49,7 +49,7 @@ from utils.plots import output_to_target, plot_images, plot_val_study
 from utils.torch_utils import select_device, smart_inference_mode
 
 
-def save_one_txt(predn, save_conf, shape, file):
+def save_one_txt(predn, save_conf, file, shape=(512, 512)):
     Path(file).parent.mkdir(parents=True, exist_ok=True)
     # Save one txt result
     gn = torch.tensor(shape)[[1, 0, 1, 0]]  # normalization gain whwh
@@ -58,6 +58,22 @@ def save_one_txt(predn, save_conf, shape, file):
         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
         with open(file, 'a') as f:
             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+
+
+def save_one_csv(keys, img_name, predn, save_conf, file, shape=(512, 512)):
+    from utils.general import xyxy2xywh
+
+    n = predn.shape[1] + 1  # number of cols
+    s = '' if file.exists() else (('%20s,' * n % tuple(keys)).rstrip(',') + '\n')  # add header
+    Path(file).parent.mkdir(parents=True, exist_ok=True)
+    # Save one txt result
+    gn = torch.tensor(shape)[[1, 0, 1, 0]]  # normalization gain whwh
+    with open(file, 'a') as f:
+        f.write(s)
+        for *xyxy, conf, cls in predn.tolist():
+            xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+            line = (cls, *xywh, conf) if save_conf else (img_name, cls, *xywh)  # label format
+            f.write(f'{img_name},' + ('%20.5g,' * len(line)).rstrip(',') % line + '\n')
 
 
 def save_one_json(predn, jdict, path, class_map):
@@ -115,6 +131,7 @@ def run(
         augment=False,  # augmented inference
         verbose=False,  # verbose output
         save_txt=False,  # save results to *.txt
+        save_csv=False,  # save results to labels.csv
         save_hybrid=False,  # save label+prediction hybrid results to *.txt
         save_conf=False,  # save confidences in --save-txt labels
         save_json=False,  # save a COCO-JSON results file
@@ -203,7 +220,7 @@ def run(
         names = dict(enumerate(names))
     class_map = coco80_to_coco91_class() if is_coco else list(range(1000))
     s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Instances', 'P', 'R', 'mAP50', 'mAP50-95')
-    tp, fp, p, r, f1, mp, mr, map50, ap50, map = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    tp, fp, p, r, f1, mp, mr, mf1, map50, ap50, map = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     dt = Profile(), Profile(), Profile()  # profiling times
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
@@ -274,7 +291,10 @@ def run(
 
             # Save/log
             if save_txt:
-                save_one_txt(predn, save_conf, shape, file=save_dir / 'labels' / f'{path.stem}.txt')
+                save_one_txt(predn, save_conf, file=save_dir / 'labels' / f'{path.stem}.txt', shape=shape)
+            if save_csv:
+                keys_labels = ['img', 'class', 'x', 'y', 'w', 'h', 'conf']
+                save_one_csv(keys_labels, path.stem, predn, save_conf, file=save_dir / 'labels.csv', shape=shape)
             if save_json:
                 save_one_json(predn, jdict, path, class_map)  # append to COCO-JSON dictionary
             callbacks.run('on_val_image_end', pred, predn, path, names, im[si])
@@ -375,6 +395,7 @@ def parse_opt():
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--verbose', action='store_true', help='report mAP by class')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    parser.add_argument('--save-csv', action='store_true', help='save results to labels.csv')
     parser.add_argument('--save-hybrid', action='store_true', help='save label+prediction hybrid results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-json', action='store_true', help='save a COCO-JSON results file')

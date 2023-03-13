@@ -100,6 +100,9 @@ class Loggers():
         self.keys_img = [
             'Average Precision',
             "AP per class"]
+        self.keys_labels = [
+            'img', 'class', 'x', 'y', 'w', 'h', 'conf'
+        ]
         self.best_keys = ['best/epoch', 'best/precision', 'best/recall', 'best/mAP_0.5', 'best/mAP_0.5:0.95']
         for k in LOGGERS:
             setattr(self, k, None)  # init empty logger dictionary
@@ -298,17 +301,19 @@ class Loggers():
             for v in zip(*v_img):
                 f.write(s + ('%20.5g,' * n % tuple(v)).rstrip(',') + '\n')
 
-    def on_recurrent_save_img(self, epoch, preds_tuple, save_conf=True):
-        from val import save_one_txt
+    def on_recurrent_save_img(self, epoch, preds_tuple, save_conf=True, save_txt=False):
         epoch = epoch if epoch else "Eval_metrics"
         save_dir = self.recurrent_save_dir / f"{epoch}"
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # Preds
-        preds_dir = save_dir / 'labels'
-        preds_dir.mkdir(parents=True, exist_ok=True)
         preds, shape, img_name = preds_tuple
-        save_one_txt(preds, save_conf, shape, file=preds_dir / f'{img_name}.txt')
+        if save_txt:
+            from val import save_one_txt
+            save_one_txt(preds, save_conf, file=save_dir / f'labels/{img_name}.txt', shape=shape)
+        else:
+            from val import save_one_csv
+            save_one_csv(self.keys_labels, img_name, preds, save_conf, file=save_dir / 'labels.csv', shape=shape)
 
     def on_model_save(self, last, epoch, final_epoch, best_fitness, fi):
         # Callback runs on model save event

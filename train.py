@@ -177,8 +177,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     elif opt.constant_lr:
         lf = lambda x: 1
     elif opt.variable_lr:
-        lrs = hyp['var_lrs']
-        lf = lambda x: lrs[np.where(lrs[:, 1] > x)][0][0] if len(np.where(lrs[:, 1] > x)[0]) else lrs[-1, 0]
+        var_lrs = np.array(hyp['var_lrs'])
+        var_epochs = np.array(hyp['var_epochs'])
+        lf = lambda x: var_lrs[np.where(var_epochs > x)[0][0]] if len(np.where(var_epochs > x)[0]) else var_lrs[-1]
     else:
         lf = lambda x: (1 - x / epochs) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf,

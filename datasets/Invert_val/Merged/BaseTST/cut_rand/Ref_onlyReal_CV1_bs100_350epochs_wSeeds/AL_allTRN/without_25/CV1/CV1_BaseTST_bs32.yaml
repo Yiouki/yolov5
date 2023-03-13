@@ -1,0 +1,6 @@
+path: /home/ruiz/codes/yolov5_perso/datasets/Invert_val/Merged/BaseTST/cut_rand/Ref_onlyReal_CV1_bs100_350epochs_wSeeds/AL_allTRN/without_25/CV1
+train: CV1_BaseTST_bs32_TRN.txt
+val: CV1_BaseTST_bs32_VAL.txt
+
+nc: 1
+names: ['object']
