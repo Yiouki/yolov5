@@ -15,10 +15,13 @@ import torch
 from utils import TryExcept, threaded
 
 
-def fitness(x):
+def fitness(x, method='default'):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
-    return (x[:, :4] * w).sum(1)
+    if method == 'default':
+        w = [0.0, 0.0, 0.0, 0.1, 0.9]  # weights for [P, R; F1, mAP@0.5, mAP@0.5:0.95]
+    elif method == 'perso':
+        w = [0.0, 0.0, 1.0, 0.0, 0.0]  # weights for [P, R; F1, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :5] * w).sum(1)
 
 
 def smooth(y, f=0.05):

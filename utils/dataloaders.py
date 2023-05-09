@@ -25,7 +25,9 @@ import torch.nn.functional as F
 import torchvision
 import yaml
 from PIL import ExifTags, Image, ImageOps
-from torch.utils.data import DataLoader, Dataset, dataloader, distributed
+from torch.utils.data import DataLoader, Dataset, dataloader, distributed, Sampler
+from torch.utils.data.sampler import BatchSampler
+from typing import Optional, Sized, Iterator
 from tqdm import tqdm
 
 from utils.augmentations import (Albumentations, augment_hsv, classify_albumentations, classify_transforms, copy_paste,
@@ -115,7 +117,9 @@ def create_dataloader(path,
                       image_weights=False,
                       quad=False,
                       prefix='',
-                      shuffle=False):
+                      shuffle=False,
+                      al_paths=0,
+                      al_per_batch=1):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
@@ -132,12 +136,20 @@ def create_dataloader(path,
             stride=int(stride),
             pad=pad,
             image_weights=image_weights,
-            prefix=prefix)
+            prefix=prefix,
+            al_paths=al_paths,
+            al_per_batch=al_per_batch)
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
     nw = min([os.cpu_count() // max(nd, 1), batch_size if batch_size > 1 else 0, workers])  # number of workers
     sampler = None if rank == -1 else distributed.DistributedSampler(dataset, shuffle=shuffle)
+    # if al_paths:
+    #     loader = ActiveLearningLoader
+    # elif image_weights:
+    #     loader = DataLoader
+    # else:
+    #     loader = InfiniteDataLoader
     loader = DataLoader if image_weights else InfiniteDataLoader  # only DataLoader allows for attribute updates
     generator = torch.Generator()
     generator.manual_seed(6148914691236517205 + RANK) # 6148914691236517205 + RANK
@@ -160,7 +172,16 @@ class InfiniteDataLoader(dataloader.DataLoader):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        object.__setattr__(self, 'batch_sampler', _RepeatSampler(self.batch_sampler))
+
+        # Active Learning
+        if self.dataset.al_paths > 0:
+            object.__setattr__(self, 'sampler', ActiveLearningSampler(self.sampler))
+            self.sampler.set_dataset(self.dataset)
+            self.sampler.set_al_samples(self.dataset.al_per_batch)
+            object.__setattr__(self, 'batch_sampler', _RepeatSampler(BatchSampler(self.sampler, self.batch_size, self.drop_last)))
+        else:
+            object.__setattr__(self, 'batch_sampler', _RepeatSampler(self.batch_sampler))
+
         self.iterator = super().__iter__()
 
     def __len__(self):
@@ -169,6 +190,47 @@ class InfiniteDataLoader(dataloader.DataLoader):
     def __iter__(self):
         for _ in range(len(self)):
             yield next(self.iterator)
+
+
+class ActiveLearningSampler(Sampler[int]):
+
+    def __init__(self, data_source: Sized, generator=None) -> None:
+        self.data_source = data_source
+        self.generator = generator
+
+    def set_al_samples(self, al_samples) -> int:
+        self.al_samples = al_samples
+
+    def get_al_samples(self) -> int:
+        return self.al_samples
+    
+    def set_dataset(self, dataset):
+        self.dataset = dataset
+    
+    def __len__(self):
+        return self.dataset.al_paths * self.dataset.batch_size
+
+    def __iter__(self) -> Iterator[int]:
+        bs = self.dataset.batch_size
+        n = len(self.dataset.indices)
+        n_al = self.dataset.al_paths
+
+        if self.generator is None:
+            seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+            # generator.manual_seed(2510)
+        else:
+            generator = self.generator
+
+        if n_al > 0:
+            # AL
+            for _ in range(self.al_samples):
+                yield from torch.randint(high=n_al, size=(1,), dtype=torch.int64, generator=generator).tolist()
+            # Normal
+            yield from torch.randint(low=n_al, high=n, size=(n,), dtype=torch.int64, generator=generator).tolist()[:bs - self.al_samples]
+        else:
+            yield from torch.randperm(n, generator=generator).tolist()[:bs]
 
 
 class _RepeatSampler:
@@ -183,6 +245,9 @@ class _RepeatSampler:
 
     def __iter__(self):
         while True:
+            # batch = iter(self.sampler)
+            # print(f'Batch sampler: {[x for x in batch]}')
+            # yield from batch
             yield from iter(self.sampler)
 
 
@@ -444,7 +509,9 @@ class LoadImagesAndLabels(Dataset):
                  single_cls=False,
                  stride=32,
                  pad=0.0,
-                 prefix=''):
+                 prefix='',
+                 al_paths=0,
+                 al_per_batch=1):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -510,7 +577,15 @@ class LoadImagesAndLabels(Dataset):
         nb = bi[-1] + 1  # number of batches
         self.batch = bi  # batch index of image
         self.n = n
-        self.indices = range(n)
+        self.indices = range(0, n)
+
+        # Add by Hugo
+        self.batch_size = batch_size
+        self.al_mode = True if al_paths else False
+        self.al_paths = al_paths
+        self.al_per_batch = al_per_batch
+        self.idx_al = range(al_paths)
+        self.idx_no_al = range(0 + al_paths, n)
 
         # Update labels
         include_class = []  # filter labels to include only these classes (optional)
@@ -608,7 +683,11 @@ class LoadImagesAndLabels(Dataset):
         return x
 
     def __len__(self):
-        return len(self.im_files)
+        # print(len(self.im_files), int((self.batch_size - self.al_per_batch) * self.al_paths / self.al_per_batch + self.al_paths))
+        if not self.al_mode:
+            return len(self.im_files)
+        else:
+            return self.al_paths // self.al_per_batch
 
     # def __iter__(self):
     #     self.count = -1
@@ -617,8 +696,8 @@ class LoadImagesAndLabels(Dataset):
     #     return self
 
     def __getitem__(self, index):
+        # print(f'DEBUG in dataloader get item: {len(self.idx_al)} {len(self.indices)} {index}')
         index = self.indices[index]  # linear, shuffled, or image_weights
-        # print(f"\n\tDEBUG: Process image '{self.npy_files[index]}'")
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
@@ -689,7 +768,7 @@ class LoadImagesAndLabels(Dataset):
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
 
-        return torch.from_numpy(img), labels_out, self.im_files[index], shapes
+        return torch.from_numpy(img), labels_out, self.im_files[index], shapes, index
 
     def load_image(self, i):
         # Loads 1 image from dataset index 'i', returns (im, original hw, resized hw)
@@ -850,14 +929,16 @@ class LoadImagesAndLabels(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        im, label, path, shapes = zip(*batch)  # transposed
+        # im, label, path, shapes = zip(*batch)  # transposed
+        im, label, path, shapes, idxs = zip(*batch)  # transposed
         for i, lb in enumerate(label):
             lb[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(im, 0), torch.cat(label, 0), path, shapes
+        return torch.stack(im, 0), torch.cat(label, 0), path, shapes, idxs
 
     @staticmethod
     def collate_fn4(batch):
         im, label, path, shapes = zip(*batch)  # transposed
+        # im, label, path, shapes, idxs = zip(*batch)  # transposed
         n = len(shapes) // 4
         im4, label4, path4, shapes4 = [], [], path[:n], shapes[:n]
 

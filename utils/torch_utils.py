@@ -411,10 +411,11 @@ def smart_resume(ckpt, optimizer, ema=None, weights='yolov5s.pt', epochs=300, re
 
 class EarlyStopping:
     # YOLOv5 simple early stopper
-    def __init__(self, patience=30):
+    def __init__(self, patience=30, start=0):
         self.best_fitness = 0.0  # i.e. mAP
         self.best_epoch = 0
         self.patience = patience or float('inf')  # epochs to wait after fitness stops improving to stop
+        self.start = start
         self.possible_stop = False  # possible stop may occur next epoch
 
     def __call__(self, epoch, fitness):
@@ -422,8 +423,10 @@ class EarlyStopping:
             self.best_epoch = epoch
             self.best_fitness = fitness
         delta = epoch - self.best_epoch  # epochs without improvement
+        delta_start = epoch - self.start if epoch >= self.start else 0
         self.possible_stop = delta >= (self.patience - 1)  # possible stop may occur next epoch
-        stop = delta >= self.patience  # stop training if patience exceeded
+        # stop training if patience exceeded | 
+        stop = (delta >= self.patience) and (delta_start >= self.patience)
         if stop:
             LOGGER.info(f'Stopping training early as no improvement observed in last {self.patience} epochs. '
                         f'Best results observed at epoch {self.best_epoch}, best model saved as best.pt.\n'

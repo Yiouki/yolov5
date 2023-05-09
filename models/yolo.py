@@ -124,9 +124,9 @@ class BaseModel(nn.Module):
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
             if vectors and vectors[-1]:
-                layer, vectors_dir = vectors
+                layer, vectors_dir, img_name = vectors
                 if m.i == layer:
-                    get_feature_vectors(x, m.type, m.i, save_dir=vectors_dir)
+                    get_feature_vectors(x, m.type, img_name, save_dir=vectors_dir)
         return x
 
     def _profile_one_layer(self, m, x, dt):
