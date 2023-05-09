@@ -1,0 +1,2 @@
+/home/ruiz/data/Databases/DGX_512/4CV/images/2/FLEG_20130529_022716_channel2_waterfall_crop_2540_6434.png
+/home/ruiz/data/Databases/DGX_512/4CV/images/4/FLEG_20130528_230516_channel5_waterfall_crop_66_4970.png

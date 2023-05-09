@@ -209,7 +209,7 @@ def feature_visualization(x, module_type, stage, n=32, save_dir=Path('runs/detec
             np.save(str(f.with_suffix('.npy')), x[0].cpu().numpy())  # npy save
 
 
-def get_feature_vectors(x, module_type, stage, save_dir=Path('runs/detect/exp')):
+def get_feature_vectors(x, module_type, name, save_dir=Path('runs/detect/exp')):
     """
     x:              Features to be visualized
     module_type:    Module type
@@ -220,8 +220,8 @@ def get_feature_vectors(x, module_type, stage, save_dir=Path('runs/detect/exp'))
     if 'Detect' not in module_type:
         batch, channels, height, width = x.shape  # batch, channels, height, width
         if height > 1 and width > 1:
-            f = save_dir / f"stage{stage}_{module_type.split('.')[-1]}_features.npy"  # filename
-            LOGGER.info(f'[FV] Saving {f}... ({channels} features)')
+            f = save_dir / f"{name}.npy"  # filename
+            # LOGGER.info(f'[FV] Saving {f}... ({channels} features)')
             np.save(str(f), x[0].cpu().numpy())  # npy save
 
 

@@ -95,7 +95,7 @@ def run(
         source = Path(source).read_text().split('\n')[:-1]
 
     # Directories
-    save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
+    save_dir = increment_path(Path(project) / name, exist_ok=exist_ok, sep='_')  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Load model
@@ -130,8 +130,13 @@ def run(
         # Inference
         with dt[1]:
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-            vectors = increment_path(save_dir / "feature_vectors" / Path(path).stem, mkdir=True) if feature_vectors else False
-            pred = model(im, augment=augment, visualize=visualize, vectors=(9, vectors))
+            layer = 9
+            if feature_vectors:
+                vectors = save_dir / "features_vectors" / f"layer_{layer}"
+                vectors.mkdir(parents=True, exist_ok=True)
+            else:
+                vectors = False
+            pred = model(im, augment=augment, visualize=visualize, vectors=(layer, vectors, Path(path).stem)) if feature_vectors else model(im, augment=augment, visualize=visualize)
 
         # print(pred, pred.shape)
         # toto()

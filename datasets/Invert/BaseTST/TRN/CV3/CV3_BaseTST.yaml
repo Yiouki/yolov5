@@ -1,0 +1,6 @@
+path: /home/ruiz/codes/yolov5_perso/datasets/Invert/BaseTST/TRN/CV3
+train: CV3_BaseTST_TRN.txt
+val: /home/ruiz/codes/yolov5_perso/datasets/Invert/BaseTST/CV3_BaseTST.txt
+
+nc: 1
+names: ['object']

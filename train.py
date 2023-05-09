@@ -143,6 +143,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
     else:
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model_ema = None
     amp = check_amp(model)  # check AMP
 
     # Freeze
@@ -177,8 +178,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     elif opt.constant_lr:
         lf = lambda x: 1
     elif opt.variable_lr:
-        lrs = hyp['var_lrs']
-        lf = lambda x: lrs[np.where(lrs[:, 1] > x)][0][0] if len(np.where(lrs[:, 1] > x)[0]) else lrs[-1, 0]
+        var_lrs = np.array(hyp['var_lrs'])
+        var_epochs = np.array(hyp['var_epochs'])
+        lf = lambda x: var_lrs[np.where(var_epochs > x)[0][0]] if len(np.where(var_epochs > x)[0]) else var_lrs[-1]
     else:
         lf = lambda x: (1 - x / epochs) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf,
@@ -220,7 +222,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               image_weights=opt.image_weights,
                                               quad=opt.quad,
                                               prefix=colorstr('train: '),
-                                              shuffle=True)
+                                              shuffle=True,
+                                              al_paths=opt.nb_al,
+                                              al_per_batch=opt.nb_al_batch,
+                                              )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -276,7 +281,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     results = (0, 0, 0, 0, 0, 0, 0, 0)  # P, R, F1, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    stopper, stop = EarlyStopping(patience=opt.patience), False
+    stopper, stop = EarlyStopping(patience=opt.patience, start=opt.start_early_stop), False
     compute_loss = ComputeLoss(model)  # init loss class
 
     callbacks.run('on_train_start')
@@ -301,13 +306,34 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         mloss = torch.zeros(3, device=device)  # mean losses
         if RANK != -1:
             train_loader.sampler.set_epoch(epoch)
+
+        ## DEBUG HUGO
+        # print(train_loader.sampler)
+        # for i, d in enumerate(iter(train_loader.sampler)):
+        #     print(f'{i}: {d}')
+        #     if i > 32:
+        #         for dd in iter(train_loader.batch_sampler):
+        #             print(f'({len(dd)}) {dd}')
+        #             break
+        #         break
+        #     # print(f'{i}: ({len(d)}) {d}')
+        #     # tata()
+
+        # for dd in iter(train_loader.batch_sampler):
+        #     print(f'({len(dd)}) {dd}')
+        #     break
+
         pbar = enumerate(train_loader)
         LOGGER.info(('\n' + '%11s' * 7) % ('Epoch', 'GPU_mem', 'box_loss', 'obj_loss', 'cls_loss', 'Instances', 'Size'))
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
 
-        for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+        for i, (imgs, targets, paths, _, idx) in pbar:  # batch -------------------------------------------------------------
+            # print(f"\nDEBUG {len(idx)} {idx}\n")
+            # if i > 2:
+            #     stopithere()
+            
             # print(f'(train) RAM memory: {psutil.virtual_memory()[3]/1E9:.2f}/{psutil.virtual_memory()[0]/1E9:.2f} Go ({psutil.virtual_memory()[2]}%)')
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
@@ -378,7 +404,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             callbacks.run('on_train_epoch_end', epoch=epoch)
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
             final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
-            if epoch % opt.val_period == 0 or opt.recurrent_save or not noval or final_epoch:  # Calculate mAP
+            if not noval and (epoch % opt.val_period == 0 or opt.recurrent_save or final_epoch):  # Calculate mAP
                 results, maps, _ = validate.run(epoch=epoch,
                                                 data=data_dict,
                                                 batch_size=batch_size // WORLD_SIZE * 2,
@@ -394,7 +420,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                                 recurrent_save=opt.recurrent_save)
 
             # Update best mAP
-            fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, F1, mAP@.5, mAP@.5-.95]
             stop = stopper(epoch=epoch, fitness=fi) if opt.early_stop else False  # early stop check
             if fi > best_fitness:
                 best_fitness = fi
@@ -402,7 +428,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)  # Save into results.csv
 
             # Save model
-            if epoch % opt.val_period == 0 or (not nosave) or (final_epoch and not evolve):  # if save
+            if not nosave and (epoch % opt.val_period == 0 or (final_epoch and not evolve)):  # if save
                 ckpt = {
                     'epoch': epoch,
                     'best_fitness': best_fitness,
@@ -513,8 +539,14 @@ def parse_opt(known=False):
     parser.add_argument('--constant-lr', action='store_true', help='constant LR scheduler')
     parser.add_argument('--variable-lr', action='store_true', help='variable LR (go to hyp file)')
     parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
+
     parser.add_argument('--early-stop', action='store_true', help='To enable EarlyStopping (to combine with patience)')
+    parser.add_argument('--start-early-stop', type=int, default=100, help='When the early stop begin')
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
+    parser.add_argument('--method-fitness', type=str, default='default', help='Method to compute fitness weighted (default / perso)')
+    parser.add_argument('--nb-al', type=int, help='Number of Active Learning images during the training')
+    parser.add_argument('--nb-al-batch', type=int, help='Number of AL images per batch during the training')
+    
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
     parser.add_argument('--recurrent-save', action='store_true', help='Save results every epoch and more data')
     parser.add_argument('--results-period', type=int, default=-1, help='Save results every x epochs (disabled if < 1)')
