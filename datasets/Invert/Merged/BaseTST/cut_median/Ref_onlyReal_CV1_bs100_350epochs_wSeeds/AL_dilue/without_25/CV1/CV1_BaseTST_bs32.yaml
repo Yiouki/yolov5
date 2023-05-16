@@ -1,6 +1,0 @@
-path: /home/ruiz/codes/yolov5_perso/datasets/Invert/Merged/BaseTST/cut_median/Ref_onlyReal_CV1_bs100_350epochs_wSeeds/AL_dilue/without_25/CV1
-train: CV1_BaseTST_bs32_TRN.txt
-val: /home/ruiz/codes/yolov5_perso/datasets/Invert/Merged/BaseTST/cut_median/Ref_onlyReal_CV1_bs100_350epochs_wSeeds/AL_dilue/Ref/CV1_BaseTST_without200.txt
-
-nc: 1
-names: ['object']

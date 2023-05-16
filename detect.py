@@ -138,6 +138,9 @@ def run(
                 vectors = False
             pred = model(im, augment=augment, visualize=visualize, vectors=(layer, vectors, Path(path).stem)) if feature_vectors else model(im, augment=augment, visualize=visualize)
 
+        # print(pred, pred.shape)
+        # toto()
+
         # NMS
         with dt[2]:
             # if isinstance(model.model, Ensemble):

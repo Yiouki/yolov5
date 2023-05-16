@@ -1,6 +1,0 @@
-path: /home/ruiz/codes/yolov5_perso/datasets/BaseMixte/CV1
-train: cut_CV1_BaseMixte_TRN.txt
-val: cut_CV1_BaseMixte_VAL.txt
-
-nc: 1
-names: ['mine']
