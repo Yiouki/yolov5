@@ -307,22 +307,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK != -1:
             train_loader.sampler.set_epoch(epoch)
 
-        ## DEBUG HUGO
-        # print(train_loader.sampler)
-        # for i, d in enumerate(iter(train_loader.sampler)):
-        #     print(f'{i}: {d}')
-        #     if i > 32:
-        #         for dd in iter(train_loader.batch_sampler):
-        #             print(f'({len(dd)}) {dd}')
-        #             break
-        #         break
-        #     # print(f'{i}: ({len(d)}) {d}')
-        #     # tata()
-
-        # for dd in iter(train_loader.batch_sampler):
-        #     print(f'({len(dd)}) {dd}')
-        #     break
-
         pbar = enumerate(train_loader)
         LOGGER.info(('\n' + '%11s' * 7) % ('Epoch', 'GPU_mem', 'box_loss', 'obj_loss', 'cls_loss', 'Instances', 'Size'))
         if RANK in {-1, 0}:
