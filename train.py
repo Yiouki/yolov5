@@ -528,8 +528,8 @@ def parse_opt(known=False):
     parser.add_argument('--start-early-stop', type=int, default=100, help='When the early stop begin')
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
     parser.add_argument('--method-fitness', type=str, default='default', help='Method to compute fitness weighted (default / perso)')
-    parser.add_argument('--nb-al', type=int, help='Number of Active Learning images during the training')
-    parser.add_argument('--nb-al-batch', type=int, help='Number of AL images per batch during the training')
+    parser.add_argument('--nb-al', type=int, default=0, help='Number of Active Learning images during the training')
+    parser.add_argument('--nb-al-batch', type=int, default=1, help='Number of AL images per batch during the training')
     
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
     parser.add_argument('--recurrent-save', action='store_true', help='Save results every epoch and more data')
